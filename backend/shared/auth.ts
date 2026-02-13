@@ -1,0 +1,218 @@
+import { HttpRequest, InvocationContext } from '@azure/functions';
+import jwt from 'jsonwebtoken';
+import jwksClient from 'jwks-rsa';
+import { query } from './database';
+
+// JWT verification client for Azure AD B2C
+let jwksClientInstance: jwksClient.JwksClient | null = null;
+
+/**
+ * Get or create JWKS client for Azure AD B2C
+ */
+function getJwksClient(): jwksClient.JwksClient {
+  if (!jwksClientInstance) {
+    const tenantName = process.env.AZURE_AD_B2C_TENANT_NAME;
+    const policyName = process.env.AZURE_AD_B2C_POLICY_NAME || 'B2C_1_signupsignin';
+
+    if (!tenantName) {
+      throw new Error('AZURE_AD_B2C_TENANT_NAME environment variable is not set');
+    }
+
+    const jwksUri = `https://${tenantName}.b2clogin.com/${tenantName}.onmicrosoft.com/${policyName}/discovery/v2.0/keys`;
+
+    jwksClientInstance = jwksClient({
+      jwksUri,
+      cache: true,
+      cacheMaxAge: 3600000, // 1 hour
+    });
+  }
+
+  return jwksClientInstance;
+}
+
+/**
+ * Get signing key from JWKS endpoint
+ */
+function getSigningKey(header: jwt.JwtHeader): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const client = getJwksClient();
+
+    client.getSigningKey(header.kid, (err, key) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+
+      const signingKey = key?.getPublicKey();
+      resolve(signingKey || '');
+    });
+  });
+}
+
+/**
+ * Decoded token payload interface
+ */
+export interface DecodedToken {
+  oid: string; // Object ID (Azure AD user ID)
+  sub: string; // Subject
+  email?: string;
+  emails?: string[];
+  name?: string;
+  given_name?: string;
+  family_name?: string;
+  exp: number;
+  iat: number;
+  aud: string;
+  iss: string;
+}
+
+/**
+ * User profile with role
+ */
+export interface UserProfile {
+  id: string;
+  azureAdObjectId: string;
+  email: string;
+  fullName?: string;
+  role: 'user' | 'business_analyst' | 'promaster';
+}
+
+/**
+ * Verify Azure AD B2C token
+ * @param token JWT token from Authorization header
+ * @returns Decoded token payload
+ */
+export async function verifyToken(token: string): Promise<DecodedToken> {
+  const clientId = process.env.AZURE_AD_B2C_CLIENT_ID;
+  const tenantName = process.env.AZURE_AD_B2C_TENANT_NAME;
+  const policyName = process.env.AZURE_AD_B2C_POLICY_NAME || 'B2C_1_signupsignin';
+
+  if (!clientId || !tenantName) {
+    throw new Error('Azure AD B2C configuration is incomplete');
+  }
+
+  return new Promise((resolve, reject) => {
+    jwt.verify(
+      token,
+      async (header, callback) => {
+        try {
+          const key = await getSigningKey(header);
+          callback(null, key);
+        } catch (err) {
+          callback(err as Error);
+        }
+      },
+      {
+        audience: clientId,
+        issuer: `https://${tenantName}.b2clogin.com/${tenantName}.onmicrosoft.com/${policyName}/v2.0/`,
+        algorithms: ['RS256'],
+      },
+      (err, decoded) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(decoded as DecodedToken);
+        }
+      }
+    );
+  });
+}
+
+/**
+ * Extract and verify Bearer token from Authorization header
+ * @param request HTTP request
+ * @returns Decoded token
+ */
+export async function authenticateRequest(request: HttpRequest): Promise<DecodedToken> {
+  const authHeader = request.headers.get('Authorization');
+
+  if (!authHeader) {
+    throw new Error('Missing Authorization header');
+  }
+
+  const parts = authHeader.split(' ');
+
+  if (parts.length !== 2 || parts[0].toLowerCase() !== 'bearer') {
+    throw new Error('Invalid Authorization header format. Expected: Bearer <token>');
+  }
+
+  const token = parts[1];
+
+  try {
+    return await verifyToken(token);
+  } catch (error: any) {
+    throw new Error(`Token verification failed: ${error.message}`);
+  }
+}
+
+/**
+ * Get or create user profile from database
+ * @param decodedToken Decoded Azure AD B2C token
+ * @returns User profile with role
+ */
+export async function getUserProfile(decodedToken: DecodedToken): Promise<UserProfile> {
+  const azureAdObjectId = decodedToken.oid || decodedToken.sub;
+  const email = decodedToken.email || decodedToken.emails?.[0] || '';
+  const fullName = decodedToken.name || `${decodedToken.given_name || ''} ${decodedToken.family_name || ''}`.trim();
+
+  // Try to get existing user profile
+  const result = await query<UserProfile>(
+    'SELECT id, azure_ad_object_id as "azureAdObjectId", email, full_name as "fullName", role FROM user_profiles WHERE azure_ad_object_id = $1',
+    [azureAdObjectId]
+  );
+
+  if (result.rows.length > 0) {
+    return result.rows[0];
+  }
+
+  // Create new user profile if doesn't exist
+  const insertResult = await query<UserProfile>(
+    `INSERT INTO user_profiles (azure_ad_object_id, email, full_name, role)
+     VALUES ($1, $2, $3, 'user')
+     RETURNING id, azure_ad_object_id as "azureAdObjectId", email, full_name as "fullName", role`,
+    [azureAdObjectId, email, fullName]
+  );
+
+  return insertResult.rows[0];
+}
+
+/**
+ * CORS headers configuration
+ */
+export function getCorsHeaders(origin?: string | null): Record<string, string> {
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
+  const staticWebAppUrl = process.env.STATIC_WEB_APP_URL;
+
+  if (staticWebAppUrl) {
+    allowedOrigins.push(staticWebAppUrl);
+  }
+
+  // Add localhost for development
+  if (process.env.NODE_ENV !== 'production') {
+    allowedOrigins.push('http://localhost:5173', 'http://localhost:8080');
+  }
+
+  const allowedOrigin = origin && allowedOrigins.includes(origin)
+    ? origin
+    : (allowedOrigins[0] || '*');
+
+  return {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Credentials': 'true',
+  };
+}
+
+/**
+ * Check if user has required role
+ * @param userRole User's current role
+ * @param requiredRoles Array of roles that are allowed
+ * @returns true if user has permission
+ */
+export function hasRole(
+  userRole: string,
+  requiredRoles: string[]
+): boolean {
+  return requiredRoles.includes(userRole);
+}
