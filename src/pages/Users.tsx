@@ -28,7 +28,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import azureApi from '@/lib/azureApi';
 import { userProfilesApi } from '@/lib/api';
 import { UserProfile, UserRole } from '@/types/database';
 import { Pencil, Trash2, UserPlus } from 'lucide-react';
@@ -102,23 +102,24 @@ export default function Users() {
     }
 
     try {
-      // Call the edge function to create the user
-      const { data, error } = await supabase.functions.invoke('create-user', {
-        body: {
-          email: addFormData.email,
-          password: addFormData.password,
-          full_name: addFormData.full_name || null,
-          role: addFormData.role,
-          account_id: profile.account_id,
-        },
+      // Note: For Azure AD B2C, users are typically created through the Azure portal or B2C sign-up flow
+      // This creates/updates a user profile in our database
+      const response = await azureApi.createUser({
+        email: addFormData.email,
+        full_name: addFormData.full_name || null,
+        role: addFormData.role,
+        // Note: azure_ad_object_id should be obtained from actual Azure AD B2C user creation
+        // For now, we'll generate a placeholder - in production, this should come from Azure AD B2C
+        azure_ad_object_id: `placeholder_${Date.now()}`,
       });
 
-      if (error) throw error;
-      if (!data.success) throw new Error(data.error || 'Failed to create user');
+      if (response.error) {
+        throw new Error(response.error);
+      }
 
       toast({
-        title: 'Success',
-        description: 'User created successfully',
+        title: 'User Profile Created',
+        description: 'User profile created. User must sign up via Azure AD B2C to complete registration.',
       });
 
       setIsAddDialogOpen(false);

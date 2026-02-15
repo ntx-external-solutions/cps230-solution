@@ -148,6 +148,146 @@ export function validateCriticalOperationInput(input: any): any {
 }
 
 /**
+ * Validate and sanitize process-system junction input
+ */
+export function validateProcessSystemInput(input: any): any {
+  const allowedFields = [
+    'process_id',
+    'system_id',
+    'process_step',
+    'activity_description',
+  ];
+
+  const sanitized: any = {};
+
+  for (const field of allowedFields) {
+    if (input[field] !== undefined) {
+      sanitized[field] = input[field];
+    }
+  }
+
+  if (!sanitized.process_id || typeof sanitized.process_id !== 'string') {
+    throw new ValidationError('process_id is required and must be a string');
+  }
+
+  if (!sanitized.system_id || typeof sanitized.system_id !== 'string') {
+    throw new ValidationError('system_id is required and must be a string');
+  }
+
+  if (!isValidUUID(sanitized.process_id)) {
+    throw new ValidationError('process_id must be a valid UUID');
+  }
+
+  if (!isValidUUID(sanitized.system_id)) {
+    throw new ValidationError('system_id must be a valid UUID');
+  }
+
+  return sanitized;
+}
+
+/**
+ * Validate and sanitize process-control junction input
+ */
+export function validateProcessControlInput(input: any): any {
+  const allowedFields = [
+    'process_id',
+    'control_id',
+    'process_step',
+    'activity_description',
+  ];
+
+  const sanitized: any = {};
+
+  for (const field of allowedFields) {
+    if (input[field] !== undefined) {
+      sanitized[field] = input[field];
+    }
+  }
+
+  if (!sanitized.process_id || typeof sanitized.process_id !== 'string') {
+    throw new ValidationError('process_id is required and must be a string');
+  }
+
+  if (!sanitized.control_id || typeof sanitized.control_id !== 'string') {
+    throw new ValidationError('control_id is required and must be a string');
+  }
+
+  if (!isValidUUID(sanitized.process_id)) {
+    throw new ValidationError('process_id must be a valid UUID');
+  }
+
+  if (!isValidUUID(sanitized.control_id)) {
+    throw new ValidationError('control_id must be a valid UUID');
+  }
+
+  return sanitized;
+}
+
+/**
+ * Validate and sanitize user profile input
+ */
+export function validateUserProfileInput(input: any): any {
+  const allowedFields = [
+    'azure_ad_object_id',
+    'email',
+    'full_name',
+    'role',
+  ];
+
+  const sanitized: any = {};
+
+  for (const field of allowedFields) {
+    if (input[field] !== undefined) {
+      sanitized[field] = input[field];
+    }
+  }
+
+  if (sanitized.email && typeof sanitized.email !== 'string') {
+    throw new ValidationError('email must be a string');
+  }
+
+  if (sanitized.role && !['user', 'business_analyst', 'promaster'].includes(sanitized.role)) {
+    throw new ValidationError('role must be one of: user, business_analyst, promaster');
+  }
+
+  return sanitized;
+}
+
+/**
+ * Validate and sanitize settings input
+ */
+export function validateSettingInput(input: any): any {
+  const allowedFields = [
+    'key',
+    'value',
+    'description',
+    'is_sensitive',
+  ];
+
+  const sanitized: any = {};
+
+  for (const field of allowedFields) {
+    if (input[field] !== undefined) {
+      sanitized[field] = input[field];
+    }
+  }
+
+  if (!sanitized.key || typeof sanitized.key !== 'string') {
+    throw new ValidationError('key is required and must be a string');
+  }
+
+  if (!sanitized.value) {
+    throw new ValidationError('value is required');
+  }
+
+  if (sanitized.is_sensitive !== undefined && typeof sanitized.is_sensitive !== 'boolean') {
+    throw new ValidationError('is_sensitive must be a boolean');
+  }
+
+  return sanitized;
+}
+
+/**
  * Validate UUID format
  */
 export function isValidUUID(uuid: string): boolean {

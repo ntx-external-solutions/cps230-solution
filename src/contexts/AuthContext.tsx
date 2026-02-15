@@ -1,127 +1,175 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
-import { userProfilesApi } from '@/lib/api';
+import {
+  PublicClientApplication,
+  AccountInfo,
+  InteractionRequiredAuthError,
+  AuthenticationResult,
+} from '@azure/msal-browser';
+import { MsalProvider, useMsal, useIsAuthenticated } from '@azure/msal-react';
+import { azureApi, setAccessTokenProvider } from '@/lib/azureApi';
 import type { UserProfile } from '@/types/database';
-import { createUserProfileWithAccount } from '@/lib/accounts';
+
+// MSAL Configuration
+const msalConfig = {
+  auth: {
+    clientId: import.meta.env.VITE_B2C_CLIENT_ID || '',
+    authority: `https://${import.meta.env.VITE_B2C_TENANT_NAME}.b2clogin.com/${import.meta.env.VITE_B2C_TENANT_NAME}.onmicrosoft.com/${import.meta.env.VITE_B2C_POLICY_NAME}`,
+    knownAuthorities: [`${import.meta.env.VITE_B2C_TENANT_NAME}.b2clogin.com`],
+    redirectUri: window.location.origin,
+    postLogoutRedirectUri: window.location.origin,
+  },
+  cache: {
+    cacheLocation: 'localStorage' as const,
+    storeAuthStateInCookie: false,
+  },
+};
+
+const loginRequest = {
+  scopes: ['openid', 'profile', 'email'],
+};
+
+// Create MSAL instance
+export const msalInstance = new PublicClientApplication(msalConfig);
 
 interface AuthContextType {
-  user: User | null;
+  user: AccountInfo | null;
   profile: UserProfile | null;
-  session: Session | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (
-    email: string,
-    password: string,
-    fullName: string | undefined,
-    accountId: string,
-    isFirstUser: boolean
-  ) => Promise<void>;
+  signIn: () => Promise<void>;
+  signUp: () => Promise<void>;
   signOut: () => Promise<void>;
   isPromaster: boolean;
   isBusinessAnalyst: boolean;
+  getAccessToken: () => Promise<string>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+// Inner provider that uses MSAL hooks
+function AuthProviderInner({ children }: { children: React.ReactNode }) {
+  const { instance, accounts } = useMsal();
+  const isAuthenticated = useIsAuthenticated();
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUserProfile(session.user.id);
-      } else {
-        setLoading(false);
-      }
-    });
+  const user = accounts.length > 0 ? accounts[0] : null;
 
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUserProfile(session.user.id);
-      } else {
+  // Get access token for API calls
+  const getAccessToken = async (): Promise<string> => {
+    if (!user) {
+      throw new Error('No authenticated user');
+    }
+
+    try {
+      const response = await instance.acquireTokenSilent({
+        ...loginRequest,
+        account: user,
+      });
+      return response.accessToken;
+    } catch (error) {
+      if (error instanceof InteractionRequiredAuthError) {
+        // Fallback to interactive method
+        const response = await instance.acquireTokenPopup({
+          ...loginRequest,
+          account: user,
+        });
+        return response.accessToken;
+      }
+      throw error;
+    }
+  };
+
+  // Set up the access token provider for the API client
+  useEffect(() => {
+    setAccessTokenProvider(getAccessToken);
+  }, [user]);
+
+  // Fetch user profile when authenticated
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      if (!isAuthenticated || !user) {
         setProfile(null);
         setLoading(false);
+        return;
       }
-    });
 
-    return () => subscription.unsubscribe();
-  }, []);
+      try {
+        setLoading(true);
 
-  const fetchUserProfile = async (userId: string) => {
+        // Get or create user profile
+        const azureAdObjectId = user.localAccountId || user.homeAccountId;
+        const email = user.username;
+
+        // Try to create/update user profile
+        const result = await azureApi.createUser({
+          azure_ad_object_id: azureAdObjectId,
+          email: email,
+          full_name: user.name || undefined,
+        });
+
+        if (result.error) {
+          console.error('Error creating/updating user profile:', result.error);
+          // Still set a basic profile from Azure AD data
+          setProfile({
+            id: azureAdObjectId,
+            azure_ad_object_id: azureAdObjectId,
+            email: email,
+            full_name: user.name || null,
+            role: 'user',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          } as UserProfile);
+        } else {
+          setProfile(result.data);
+        }
+      } catch (error) {
+        console.error('Error fetching user profile:', error);
+        // Set basic profile from Azure AD
+        if (user) {
+          setProfile({
+            id: user.localAccountId || user.homeAccountId,
+            azure_ad_object_id: user.localAccountId || user.homeAccountId,
+            email: user.username,
+            full_name: user.name || null,
+            role: 'user',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          } as UserProfile);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUserProfile();
+  }, [isAuthenticated, user]);
+
+  const signIn = async () => {
     try {
-      const data = await userProfilesApi.getByUserId(userId);
-      setProfile(data);
+      await instance.loginRedirect(loginRequest);
     } catch (error) {
-      console.error('Error fetching user profile:', error);
-    } finally {
-      setLoading(false);
+      console.error('Login failed:', error);
+      throw error;
     }
   };
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) throw error;
-  };
-
-  const signUp = async (
-    email: string,
-    password: string,
-    fullName: string | undefined,
-    accountId: string,
-    isFirstUser: boolean
-  ) => {
-    // Create the auth user first
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-        },
-        // Disable email confirmation for development - remove this in production
-        emailRedirectTo: window.location.origin,
-      },
-    });
-
-    if (authError) throw authError;
-    if (!authData.user) throw new Error('Failed to create user');
-
-    // Create the user profile with account association
-    try {
-      await createUserProfileWithAccount(
-        authData.user.id,
-        email,
-        accountId,
-        isFirstUser,
-        fullName
-      );
-    } catch (profileError: any) {
-      // If profile creation fails, we should ideally delete the auth user
-      // but Supabase doesn't allow that from the client side
-      console.error('Failed to create user profile:', profileError);
-      throw new Error(`Account created but profile setup failed: ${profileError.message}`);
-    }
+  const signUp = async () => {
+    // Azure AD B2C uses the same policy for sign-in and sign-up
+    // The user can choose to sign up from the sign-in page
+    await signIn();
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    try {
+      const logoutRequest = {
+        account: user,
+        postLogoutRedirectUri: window.location.origin,
+      };
+      await instance.logoutRedirect(logoutRequest);
+    } catch (error) {
+      console.error('Logout failed:', error);
+      throw error;
+    }
   };
 
   const isPromaster = profile?.role === 'promaster';
@@ -130,16 +178,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value = {
     user,
     profile,
-    session,
     loading,
     signIn,
     signUp,
     signOut,
     isPromaster,
     isBusinessAnalyst,
+    getAccessToken,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+// Main provider that wraps with MsalProvider
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <MsalProvider instance={msalInstance}>
+      <AuthProviderInner>{children}</AuthProviderInner>
+    </MsalProvider>
+  );
 }
 
 export function useAuth() {
