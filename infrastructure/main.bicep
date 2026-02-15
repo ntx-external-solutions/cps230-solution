@@ -96,7 +96,7 @@ module postgresql 'modules/postgresql.bicep' = {
   }
 }
 
-// Deploy Azure Functions
+// Deploy Azure Functions (without Key Vault initially)
 module functionApp 'modules/functionapp.bicep' = {
   scope: resourceGroup
   name: 'functionapp-deployment'
@@ -106,9 +106,9 @@ module functionApp 'modules/functionapp.bicep' = {
     appServicePlanName: appServicePlanName
     storageAccountName: storageAccountName
     applicationInsightsConnectionString: monitoring.outputs.connectionString
-    keyVaultUri: keyVault.outputs.keyVaultUri
+    keyVaultUri: '' // Will be configured after Key Vault is created
     postgresqlConnectionString: 'Host=${postgresql.outputs.serverFqdn};Database=${postgresql.outputs.databaseName};Username=${postgresAdminUsername};Password=${postgresAdminPassword};SSL Mode=Require'
-    managedIdentityPrincipalId: keyVault.outputs.keyVaultName
+    managedIdentityPrincipalId: ''
     tags: tags
     runtime: 'node'
     runtimeVersion: '20'
@@ -120,7 +120,7 @@ module functionApp 'modules/functionapp.bicep' = {
   ]
 }
 
-// Deploy Key Vault (must be deployed early as other services depend on it)
+// Deploy Key Vault after Function App is created
 module keyVault 'modules/keyvault.bicep' = {
   scope: resourceGroup
   name: 'keyvault-deployment'
@@ -134,14 +134,17 @@ module keyVault 'modules/keyvault.bicep' = {
     enableSoftDelete: true
     enablePurgeProtection: environmentName == 'prod' ? true : false
   }
+  dependsOn: [
+    functionApp
+  ]
 }
 
-// Deploy Static Web App
+// Deploy Static Web App (must use supported region)
 module staticWebApp 'modules/staticwebapp.bicep' = {
   scope: resourceGroup
   name: 'staticwebapp-deployment'
   params: {
-    location: location
+    location: 'eastasia' // Static Web Apps not available in australiaeast, using eastasia (closest to Australia)
     staticWebAppName: staticWebAppName
     skuName: environmentName == 'prod' ? 'Standard' : 'Free'
     tags: tags
@@ -149,9 +152,6 @@ module staticWebApp 'modules/staticwebapp.bicep' = {
     repositoryBranch: githubRepositoryBranch
     apiFunctionAppHostname: functionApp.outputs.functionAppHostName
   }
-  dependsOn: [
-    functionApp
-  ]
 }
 
 // Outputs for reference and post-deployment configuration

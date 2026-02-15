@@ -32,7 +32,7 @@ resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
     name: skuName
     tier: skuName
   }
-  properties: {
+  properties: !empty(repositoryUrl) ? {
     repositoryUrl: repositoryUrl
     branch: repositoryBranch
     buildProperties: {
@@ -43,6 +43,15 @@ resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
     stagingEnvironmentPolicy: 'Enabled'
     allowConfigFileUpdates: true
     provider: 'GitHub'
+  } : {
+    buildProperties: {
+      appLocation: '/'
+      apiLocation: ''
+      outputLocation: 'dist'
+    }
+    stagingEnvironmentPolicy: 'Enabled'
+    allowConfigFileUpdates: true
+    provider: 'None'
   }
 }
 
