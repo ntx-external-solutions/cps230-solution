@@ -40,7 +40,7 @@ export default function Signup() {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  d="M9 12h6m-6 4h6m2 5H7a 2 2 0 0 1 -2 -2V5a 2 2 0 0 1 2 -2h5.586a 1 1 0 0 1 .707 .293l5.414 5.414a 1 1 0 0 1 .293 .707V19a 2 2 0 0 1 -2 2z"
                 />
               </svg>
             </div>
@@ -53,16 +53,16 @@ export default function Signup() {
           <CardHeader>
             <CardTitle>Sign Up</CardTitle>
             <CardDescription>
-              Create a new account using Azure AD B2C
+              Create a new account using Azure AD
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="text-sm text-muted-foreground space-y-2">
               <p>
-                This application uses Azure Active Directory B2C for secure authentication.
+                This application uses Azure Active Directory for secure authentication.
               </p>
               <p>
-                Click the button below to be redirected to the Azure AD B2C sign-up page.
+                Click the button below to be redirected to the Microsoft sign-in page.
               </p>
             </div>
 
@@ -70,7 +70,7 @@ export default function Signup() {
               onClick={handleSignUp}
               className="w-full bg-nintex-orange hover:bg-nintex-orange-hover"
             >
-              Sign Up with Azure AD B2C
+              Sign In with Azure AD
             </Button>
 
             <div className="mt-4 text-center text-sm">

@@ -145,9 +145,20 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
 
   const signIn = async () => {
     try {
-      await instance.loginRedirect(loginRequest);
+      console.log('Starting login with request:', loginRequest);
+      console.log('Current MSAL accounts:', accounts);
+
+      // Try popup first for better error visibility
+      try {
+        const response = await instance.loginPopup(loginRequest);
+        console.log('Login successful:', response);
+      } catch (popupError) {
+        console.log('Popup failed, trying redirect:', popupError);
+        await instance.loginRedirect(loginRequest);
+      }
     } catch (error) {
       console.error('Login failed:', error);
+      alert(`Login error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       throw error;
     }
   };
@@ -190,6 +201,43 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
 
 // Main provider that wraps with MsalProvider
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [msalReady, setMsalReady] = useState(false);
+  const [msalError, setMsalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const initializeMsal = async () => {
+      try {
+        console.log('Initializing MSAL with config:', {
+          clientId: msalConfig.auth.clientId,
+          authority: msalConfig.auth.authority,
+          redirectUri: msalConfig.auth.redirectUri,
+        });
+        await msalInstance.initialize();
+        console.log('MSAL initialized successfully');
+        setMsalReady(true);
+      } catch (error) {
+        console.error('MSAL initialization failed:', error);
+        setMsalError(error instanceof Error ? error.message : 'Unknown error');
+      }
+    };
+
+    initializeMsal();
+  }, []);
+
+  if (msalError) {
+    return (
+      <div style={{ padding: '20px', color: 'red' }}>
+        <h3>Authentication Error</h3>
+        <p>Failed to initialize authentication: {msalError}</p>
+        <pre>{JSON.stringify(msalConfig, null, 2)}</pre>
+      </div>
+    );
+  }
+
+  if (!msalReady) {
+    return <div style={{ padding: '20px' }}>Initializing authentication...</div>;
+  }
+
   return (
     <MsalProvider instance={msalInstance}>
       <AuthProviderInner>{children}</AuthProviderInner>
