@@ -9,13 +9,12 @@ import { MsalProvider, useMsal, useIsAuthenticated } from '@azure/msal-react';
 import { azureApi, setAccessTokenProvider } from '@/lib/azureApi';
 import type { UserProfile } from '@/types/database';
 
-// MSAL Configuration
+// MSAL Configuration for Azure AD
 const msalConfig = {
   auth: {
-    clientId: import.meta.env.VITE_B2C_CLIENT_ID || '',
-    authority: `https://${import.meta.env.VITE_B2C_TENANT_NAME}.b2clogin.com/${import.meta.env.VITE_B2C_TENANT_NAME}.onmicrosoft.com/${import.meta.env.VITE_B2C_POLICY_NAME}`,
-    knownAuthorities: [`${import.meta.env.VITE_B2C_TENANT_NAME}.b2clogin.com`],
-    redirectUri: window.location.origin,
+    clientId: import.meta.env.VITE_AZURE_CLIENT_ID || '',
+    authority: `https://login.microsoftonline.com/${import.meta.env.VITE_AZURE_TENANT_ID}`,
+    redirectUri: import.meta.env.VITE_REDIRECT_URI || window.location.origin,
     postLogoutRedirectUri: window.location.origin,
   },
   cache: {
@@ -25,7 +24,7 @@ const msalConfig = {
 };
 
 const loginRequest = {
-  scopes: ['openid', 'profile', 'email'],
+  scopes: ['openid', 'profile', 'email', 'User.Read'],
 };
 
 // Create MSAL instance
@@ -154,8 +153,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
   };
 
   const signUp = async () => {
-    // Azure AD B2C uses the same policy for sign-in and sign-up
-    // The user can choose to sign up from the sign-in page
+    // Azure AD sign-up flow - users sign up through the sign-in page
     await signIn();
   };
 
