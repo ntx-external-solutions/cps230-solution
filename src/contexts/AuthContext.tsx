@@ -53,7 +53,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
 
   const user = accounts.length > 0 ? accounts[0] : null;
 
-  // Get access token for API calls
+  // Get ID token for API calls (ID token is used for backend authentication)
   const getAccessToken = async (): Promise<string> => {
     if (!user) {
       throw new Error('No authenticated user');
@@ -64,7 +64,9 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
         ...loginRequest,
         account: user,
       });
-      return response.accessToken;
+      // Return ID token instead of access token for backend authentication
+      // ID token has our client ID as the audience, access token is for Microsoft Graph
+      return response.idToken;
     } catch (error) {
       if (error instanceof InteractionRequiredAuthError) {
         // Fallback to interactive method
@@ -72,7 +74,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
           ...loginRequest,
           account: user,
         });
-        return response.accessToken;
+        return response.idToken;
       }
       throw error;
     }

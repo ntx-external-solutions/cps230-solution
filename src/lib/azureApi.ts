@@ -29,7 +29,7 @@ async function apiCall<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
-    // Get access token
+    // Get ID token (not access token) for backend authentication
     let token: string | null = null;
     if (getAccessTokenFn) {
       try {
