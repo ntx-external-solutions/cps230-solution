@@ -3,22 +3,21 @@ import jwt from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
 import { query } from './database';
 
-// JWT verification client for Azure AD B2C
+// JWT verification client for Azure AD
 let jwksClientInstance: jwksClient.JwksClient | null = null;
 
 /**
- * Get or create JWKS client for Azure AD B2C
+ * Get or create JWKS client for Azure AD
  */
 function getJwksClient(): jwksClient.JwksClient {
   if (!jwksClientInstance) {
-    const tenantName = process.env.AZURE_AD_B2C_TENANT_NAME;
-    const policyName = process.env.AZURE_AD_B2C_POLICY_NAME || 'B2C_1_signupsignin';
+    const tenantId = process.env.AZURE_TENANT_ID;
 
-    if (!tenantName) {
-      throw new Error('AZURE_AD_B2C_TENANT_NAME environment variable is not set');
+    if (!tenantId) {
+      throw new Error('AZURE_TENANT_ID environment variable is not set');
     }
 
-    const jwksUri = `https://${tenantName}.b2clogin.com/${tenantName}.onmicrosoft.com/${policyName}/discovery/v2.0/keys`;
+    const jwksUri = `https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`;
 
     jwksClientInstance = jwksClient({
       jwksUri,
@@ -78,17 +77,16 @@ export interface UserProfile {
 }
 
 /**
- * Verify Azure AD B2C token
+ * Verify Azure AD token
  * @param token JWT token from Authorization header
  * @returns Decoded token payload
  */
 export async function verifyToken(token: string): Promise<DecodedToken> {
-  const clientId = process.env.AZURE_AD_B2C_CLIENT_ID;
-  const tenantName = process.env.AZURE_AD_B2C_TENANT_NAME;
-  const policyName = process.env.AZURE_AD_B2C_POLICY_NAME || 'B2C_1_signupsignin';
+  const clientId = process.env.AZURE_CLIENT_ID;
+  const tenantId = process.env.AZURE_TENANT_ID;
 
-  if (!clientId || !tenantName) {
-    throw new Error('Azure AD B2C configuration is incomplete');
+  if (!clientId || !tenantId) {
+    throw new Error('Azure AD configuration is incomplete');
   }
 
   return new Promise((resolve, reject) => {
@@ -104,7 +102,7 @@ export async function verifyToken(token: string): Promise<DecodedToken> {
       },
       {
         audience: clientId,
-        issuer: `https://${tenantName}.b2clogin.com/${tenantName}.onmicrosoft.com/${policyName}/v2.0/`,
+        issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
         algorithms: ['RS256'],
       },
       (err, decoded) => {
