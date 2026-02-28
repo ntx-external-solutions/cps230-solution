@@ -88,7 +88,7 @@ export function useLatestSync() {
   return useQuery({
     queryKey: ['latest-sync'],
     queryFn: () => syncHistoryApi.getLatest(),
-    refetchInterval: 2000, // Poll every 2 seconds
+    refetchInterval: 30000, // Poll every 30 seconds
   });
 }
 

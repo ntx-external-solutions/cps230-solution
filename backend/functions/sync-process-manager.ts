@@ -153,11 +153,28 @@ async function handleSync(
       "SELECT value FROM settings WHERE key = 'nintex_api_url'"
     );
 
-    if (credentialsResult.rows.length === 0) {
-      throw new Error('Nintex API URL not configured in settings');
-    }
+    let apiUrl = '';
 
-    const apiUrl = JSON.parse(credentialsResult.rows[0].value);
+    if (credentialsResult.rows.length === 0) {
+      // Setting doesn't exist, create it
+      await query(
+        `INSERT INTO settings (key, value, modified_by)
+         VALUES ('nintex_api_url', '""', $1)
+         ON CONFLICT (key) DO NOTHING`,
+        [userProfile.email]
+      );
+    } else {
+      // Parse the value, handling empty strings and invalid JSON
+      const rawValue = credentialsResult.rows[0].value;
+      try {
+        if (rawValue && rawValue.trim() !== '' && rawValue !== '""') {
+          apiUrl = JSON.parse(rawValue);
+        }
+      } catch (parseError) {
+        context.warn('Failed to parse nintex_api_url setting:', parseError);
+        // Leave apiUrl as empty string
+      }
+    }
 
     if (!apiUrl || apiUrl === '') {
       // API not configured, return stub response

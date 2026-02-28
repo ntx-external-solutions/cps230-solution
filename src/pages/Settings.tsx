@@ -27,7 +27,7 @@ export default function Settings() {
 
   // Poll sync history when there's an active sync
   const isSyncing = latestSync?.status === 'in_progress';
-  const { data: syncHistory = [] } = useSyncHistory(isSyncing ? 2000 : undefined);
+  const { data: syncHistory = [] } = useSyncHistory(isSyncing ? 10000 : undefined);
 
   // Nintex PM settings
   const [siteUrl, setSiteUrl] = useState('');

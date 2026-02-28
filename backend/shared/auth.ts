@@ -163,12 +163,21 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
     return result.rows[0];
   }
 
-  // Create new user profile if doesn't exist
+  // Check if this is the first user in the system
+  const userCountResult = await query('SELECT COUNT(*) as count FROM user_profiles');
+  const userCount = parseInt(userCountResult.rows[0].count);
+
+  // First user gets Promaster role, all others get 'user' role
+  const role = userCount === 0 ? 'promaster' : 'user';
+
+  // Create new user profile if doesn't exist, or return existing one on conflict
   const insertResult = await query<UserProfile>(
     `INSERT INTO user_profiles (azure_ad_object_id, email, full_name, role)
-     VALUES ($1, $2, $3, 'user')
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (azure_ad_object_id)
+     DO UPDATE SET email = EXCLUDED.email, full_name = EXCLUDED.full_name
      RETURNING id, azure_ad_object_id as "azureAdObjectId", email, full_name as "fullName", role`,
-    [azureAdObjectId, email, fullName]
+    [azureAdObjectId, email, fullName, role]
   );
 
   return insertResult.rows[0];
