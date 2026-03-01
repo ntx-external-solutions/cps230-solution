@@ -23,7 +23,7 @@
     "@types/jest": "^30.0.0",
     "@types/jsonwebtoken": "^9.0.5",
     "@types/node": "^20.11.0",
-    "@types/pg": "^8.10.9",
+    "@types/pg": "^8.18.0",
     "azure-functions-core-tools": "^4.0.5530",
     "jest": "^29.7.0",
     "rimraf": "^5.0.5",
