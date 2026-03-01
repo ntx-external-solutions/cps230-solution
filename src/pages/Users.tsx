@@ -55,13 +55,13 @@ export default function Users() {
   });
 
   useEffect(() => {
-    if (profile?.account_id) {
+    if (profile) {
       fetchUsers();
     }
-  }, [profile?.account_id]);
+  }, [profile]);
 
   const fetchUsers = async () => {
-    if (!profile?.account_id) return;
+    if (!profile) return;
 
     try {
       setLoading(true);
@@ -80,7 +80,7 @@ export default function Users() {
   };
 
   const handleAddUser = async () => {
-    if (!profile?.account_id) return;
+    if (!profile) return;
 
     // Validate inputs
     if (!addFormData.email || !addFormData.password) {

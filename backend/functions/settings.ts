@@ -290,24 +290,33 @@ async function handleUpdate(
         id,
       ]
     );
-  } else {
+  } else if (key) {
+    // Use UPSERT pattern to create setting if it doesn't exist
     result = await query(
-      `UPDATE settings SET
-        value = COALESCE($1, value),
-        description = COALESCE($2, description),
-        is_sensitive = COALESCE($3, is_sensitive),
-        modified_by = $4,
-        modified_date = NOW()
-      WHERE key = $5
-      RETURNING *`,
+      `INSERT INTO settings (key, value, description, is_sensitive, modified_by)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (key)
+       DO UPDATE SET
+         value = COALESCE($2, settings.value),
+         description = COALESCE($3, settings.description),
+         is_sensitive = COALESCE($4, settings.is_sensitive),
+         modified_by = $5,
+         modified_date = NOW()
+       RETURNING *`,
       [
+        key,
         sanitized.value,
         sanitized.description,
         sanitized.is_sensitive,
         userProfile.email,
-        key,
       ]
     );
+  } else {
+    return {
+      status: 400,
+      headers: corsHeaders,
+      jsonBody: { error: 'Setting ID or key is required' },
+    };
   }
 
   if (result.rows.length === 0) {

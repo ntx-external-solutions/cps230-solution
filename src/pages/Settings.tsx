@@ -62,38 +62,12 @@ export default function Settings() {
     }
   }, [settings]);
 
-  // Load account data
+  // Load account data - disabled for Azure AD implementation
   useEffect(() => {
-    const loadAccountData = async () => {
-      if (!profile?.account_id) {
-        setIsLoadingAccount(false);
-        return;
-      }
-
-      try {
-        const { data, error } = await supabase
-          .from('accounts')
-          .select('*')
-          .eq('id', profile.account_id)
-          .single();
-
-        if (error) throw error;
-
-        if (data) {
-          setAccountName(data.account_name);
-          setAccountDomain(data.email_domain);
-          setAccountId(data.id);
-        }
-      } catch (error) {
-        console.error('Error loading account:', error);
-        toast.error('Failed to load account information');
-      } finally {
-        setIsLoadingAccount(false);
-      }
-    };
-
-    loadAccountData();
-  }, [profile?.account_id]);
+    // Azure AD implementation doesn't use separate accounts table
+    // Account info is managed through Azure AD tenant
+    setIsLoadingAccount(false);
+  }, []);
 
   const handleSaveConnection = async () => {
     try {
@@ -214,27 +188,12 @@ export default function Settings() {
   };
 
   const handleUpdateAccount = async () => {
-    if (!accountName.trim()) {
-      toast.error('Account name is required');
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('accounts')
-        .update({
-          account_name: accountName.trim(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', accountId);
-
-      if (error) throw error;
-
-      toast.success('Account updated successfully');
-    } catch (error) {
-      toast.error('Failed to update account');
-      console.error(error);
-    }
+    // Account management is handled through Azure AD tenant
+    // This functionality is not available in the Azure AD implementation
+    toast({
+      title: 'Not Available',
+      description: 'Account settings are managed through Azure AD. Contact your administrator.',
+    });
   };
 
   const getSyncStatusIcon = (status: string) => {
