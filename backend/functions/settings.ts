@@ -213,7 +213,7 @@ async function handlePost(
     RETURNING *`,
     [
       validatedData.key,
-      validatedData.value,
+      JSON.stringify(validatedData.value), // Convert to JSON string for JSONB column
       validatedData.description || null,
       validatedData.is_sensitive || false,
       userProfile.email,
@@ -267,7 +267,10 @@ async function handleUpdate(
 
   // For updates, we don't change the key
   const sanitized: any = {};
-  if (body.value !== undefined) sanitized.value = body.value;
+  if (body.value !== undefined) {
+    // Convert value to JSON string for JSONB column
+    sanitized.value = JSON.stringify(body.value);
+  }
   if (body.description !== undefined) sanitized.description = body.description;
   if (body.is_sensitive !== undefined) sanitized.is_sensitive = body.is_sensitive;
 
