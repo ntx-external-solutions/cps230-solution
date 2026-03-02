@@ -10,8 +10,9 @@ import {
   getUserProfile,
   hasRole,
 } from '../shared/auth';
-import { query, setSessionContext, getPool } from '../shared/database';
+import { query, setSessionContext, getClient } from '../shared/database';
 import { ValidationError } from '../shared/validation';
+import { PoolClient } from 'pg';
 
 /**
  * Sync Process Manager HTTP trigger function
@@ -32,14 +33,18 @@ export async function syncProcessManagerFunction(
     };
   }
 
+  let client: PoolClient | null = null;
+
   try {
     // Authenticate user
     const decodedToken = await authenticateRequest(request);
     const userProfile = await getUserProfile(decodedToken);
 
-    // Set session context for RLS
-    const pool = getPool();
-    await setSessionContext(pool, userProfile.azureAdObjectId, userProfile.role);
+    // Get a dedicated client from the pool for this request
+    client = await getClient();
+
+    // Set session context for RLS on this specific client
+    await setSessionContext(client, userProfile.azureAdObjectId, userProfile.role);
 
     // Only promasters can trigger sync
     if (!hasRole(userProfile.role, ['promaster'])) {
@@ -55,10 +60,10 @@ export async function syncProcessManagerFunction(
 
     switch (request.method) {
       case 'POST':
-        return await handleSync(syncType, userProfile, corsHeaders, context);
+        return await handleSync(syncType, userProfile, corsHeaders, context, client);
 
       case 'GET':
-        return await handleStatus(corsHeaders, context);
+        return await handleStatus(corsHeaders, context, client);
 
       default:
         return {
@@ -85,6 +90,11 @@ export async function syncProcessManagerFunction(
         error: error.message || 'An error occurred',
       },
     };
+  } finally {
+    // Always release the client back to the pool
+    if (client) {
+      client.release();
+    }
   }
 }
 
@@ -93,15 +103,16 @@ export async function syncProcessManagerFunction(
  */
 async function handleStatus(
   corsHeaders: Record<string, string>,
-  context: InvocationContext
+  context: InvocationContext,
+  client: PoolClient
 ): Promise<HttpResponseInit> {
   // Get last sync timestamp from settings
-  const lastSyncResult = await query(
+  const lastSyncResult = await client.query(
     "SELECT value FROM settings WHERE key = 'last_sync_timestamp'"
   );
 
   // Get recent sync history
-  const historyResult = await query(
+  const historyResult = await client.query(
     'SELECT * FROM sync_history ORDER BY started_at DESC LIMIT 10'
   );
 
@@ -124,7 +135,8 @@ async function handleSync(
   syncType: string,
   userProfile: any,
   corsHeaders: Record<string, string>,
-  context: InvocationContext
+  context: InvocationContext,
+  client: PoolClient
 ): Promise<HttpResponseInit> {
   // Validate sync type
   const validSyncTypes = ['full', 'incremental', 'processes', 'systems'];
@@ -137,7 +149,7 @@ async function handleSync(
   }
 
   // Create sync history record
-  const historyResult = await query(
+  const historyResult = await client.query(
     `INSERT INTO sync_history (
       sync_type, status, initiated_by
     ) VALUES ($1, $2, $3)
@@ -149,16 +161,16 @@ async function handleSync(
 
   try {
     // Get Process Manager configuration from settings
-    const siteUrlResult = await query(
+    const siteUrlResult = await client.query(
       "SELECT value FROM settings WHERE key = 'pm_site_url'"
     );
-    const usernameResult = await query(
+    const usernameResult = await client.query(
       "SELECT value FROM settings WHERE key = 'pm_username'"
     );
-    const passwordResult = await query(
+    const passwordResult = await client.query(
       "SELECT value FROM settings WHERE key = 'pm_password'"
     );
-    const tenantIdResult = await query(
+    const tenantIdResult = await client.query(
       "SELECT value FROM settings WHERE key = 'pm_tenant_id'"
     );
 
@@ -170,7 +182,7 @@ async function handleSync(
 
     // Check if Process Manager is configured
     if (!siteUrl || !username || !password || !tenantId) {
-      await query(
+      await client.query(
         `UPDATE sync_history SET
           status = $1,
           error_message = $2,
@@ -191,43 +203,174 @@ async function handleSync(
       };
     }
 
-    // Build the Nintex Process Manager API URL
-    const apiUrl = `https://${siteUrl}/api/v1`;
-
     context.log('Process Manager credentials configured:', {
       siteUrl,
       username,
       tenantId,
-      apiUrl,
       hasPassword: !!password,
     });
 
-    // TODO: Implement actual Nintex Process Manager API integration
-    // The credentials are now properly configured and ready to use:
-    // - API URL: apiUrl
-    // - Username: username
-    // - Password: password
-    // - Tenant ID: tenantId
-    //
-    // Next steps:
-    // 1. Implement authentication with Process Manager API
-    // 2. Fetch processes from Process Manager
-    // 3. Transform and store processes in the database
-    // 4. Handle pagination and batch processing
-    //
-    // For now, return a placeholder response
-    await query(
+    // Step 1: Authenticate with Process Manager using OAuth2
+    const tokenUrl = `https://${siteUrl}/oauth2/token`;
+    const authBody = new URLSearchParams({
+      grant_type: 'password',
+      username: username,
+      password: password,
+      duration: '60000', // Token duration in milliseconds
+    });
+
+    context.log('Authenticating with Process Manager...');
+    const tokenResponse = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: authBody.toString(),
+    });
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      throw new Error(`Process Manager authentication failed: ${tokenResponse.status} ${tokenResponse.statusText} - ${errorText}`);
+    }
+
+    const tokenData = await tokenResponse.json() as any;
+    const accessToken = tokenData.access_token;
+
+    if (!accessToken) {
+      throw new Error('No access token received from Process Manager');
+    }
+
+    context.log('Successfully authenticated with Process Manager');
+
+    // Step 2: Search for processes tagged with #CPS230
+    const searchUrl = `https://${siteUrl}/api/Search/Search`;
+    const searchParams = new URLSearchParams({
+      query: '#CPS230',
+      page: '1',
+      pagesize: '100', // Fetch up to 100 processes
+    });
+
+    context.log('Searching for processes tagged with #CPS230...');
+    const searchResponse = await fetch(`${searchUrl}?${searchParams}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!searchResponse.ok) {
+      const errorText = await searchResponse.text();
+      throw new Error(`Process search failed: ${searchResponse.status} ${searchResponse.statusText} - ${errorText}`);
+    }
+
+    const searchData = await searchResponse.json() as any;
+    const processes = searchData.results || [];
+
+    context.log(`Found ${processes.length} processes`);
+
+    if (processes.length === 0) {
+      await client.query(
+        `UPDATE sync_history SET
+          status = $1,
+          records_synced = $2,
+          error_message = $3,
+          completed_at = NOW()
+        WHERE id = $4`,
+        ['success', 0, 'No processes found with #CPS230 tag', syncHistoryId]
+      );
+
+      return {
+        status: 200,
+        headers: corsHeaders,
+        jsonBody: {
+          message: 'No processes found with #CPS230 tag. Please tag your processes in Process Manager.',
+          syncHistoryId,
+          status: 'success',
+          recordsSynced: 0,
+        },
+      };
+    }
+
+    // Step 3: Process each result and store in database
+    let recordsSynced = 0;
+    const errors: string[] = [];
+
+    for (const process of processes) {
+      try {
+        // Fetch detailed process data
+        const processUrl = `https://${siteUrl}/Process/Index/${process.uniqueId}`;
+        const processResponse = await fetch(processUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!processResponse.ok) {
+          errors.push(`Failed to fetch process ${process.name}: ${processResponse.statusText}`);
+          continue;
+        }
+
+        const processData = await processResponse.json() as any;
+
+        // Upsert process to database
+        await client.query(
+          `INSERT INTO processes (
+            process_name,
+            process_unique_id,
+            owner_username,
+            metadata,
+            modified_by
+          ) VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (process_unique_id)
+          DO UPDATE SET
+            process_name = EXCLUDED.process_name,
+            owner_username = EXCLUDED.owner_username,
+            metadata = EXCLUDED.metadata,
+            modified_by = EXCLUDED.modified_by,
+            modified_date = NOW()
+          `,
+          [
+            processData.name || process.name,
+            process.uniqueId,
+            processData.ownerName || process.ownerName || null,
+            JSON.stringify({
+              referenceNo: processData.referenceNo || process.referenceNo,
+              processGroup: processData.processGroupName || process.processGroupName,
+              version: processData.version,
+              publishState: processData.publishState,
+            }),
+            userProfile.email,
+          ]
+        );
+
+        recordsSynced++;
+      } catch (error: any) {
+        context.error(`Error processing process ${process.name}:`, error);
+        errors.push(`${process.name}: ${error.message}`);
+      }
+    }
+
+    // Update sync history with results
+    await client.query(
       `UPDATE sync_history SET
         status = $1,
         records_synced = $2,
         error_message = $3,
         completed_at = NOW()
       WHERE id = $4`,
-      ['success', 0, `Process Manager API integration pending. Credentials configured for ${siteUrl}`, syncHistoryId]
+      [
+        recordsSynced > 0 ? 'success' : 'failed',
+        recordsSynced,
+        errors.length > 0 ? errors.join('; ') : null,
+        syncHistoryId
+      ]
     );
 
     // Update last sync timestamp
-    await query(
+    await client.query(
       `UPDATE settings SET
         value = $1,
         modified_by = $2,
@@ -240,24 +383,19 @@ async function handleSync(
       status: 200,
       headers: corsHeaders,
       jsonBody: {
-        message: `Process Manager credentials verified for ${siteUrl}. API integration pending implementation.`,
+        message: `Successfully synced ${recordsSynced} processes from Process Manager`,
         syncHistoryId,
         status: 'success',
-        recordsSynced: 0,
-        credentials: {
-          siteUrl,
-          tenantId,
-          username,
-          apiUrl,
-        },
-        note: 'Credentials are properly configured. Next step: implement Process Manager API calls.',
+        recordsSynced,
+        totalFound: processes.length,
+        errors: errors.length > 0 ? errors : undefined,
       },
     };
   } catch (error: any) {
     context.error('Sync error:', error);
 
     // Update sync history with error
-    await query(
+    await client.query(
       `UPDATE sync_history SET
         status = $1,
         error_message = $2,
