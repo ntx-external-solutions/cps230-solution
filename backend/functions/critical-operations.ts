@@ -68,7 +68,7 @@ export async function criticalOperationsFunction(
 
     const status = error instanceof ValidationError
       ? 400
-      : error.message?.includes('Token')
+      : error.message?.includes('Token') || error.message?.includes('Authorization') || error.message?.includes('Authentication')
       ? 401
       : error.message?.includes('permission') || error.message?.includes('role')
       ? 403

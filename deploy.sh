@@ -191,33 +191,7 @@ fi
 
 unset POSTGRES_PASSWORD
 
-# Deploy backend
-print_section "Deploying Backend Functions"
-
-print_info "Installing backend dependencies..."
-cd backend
-npm install
-
-print_info "Building backend..."
-npm run build
-
-print_info "Deploying to Azure Functions..."
-if command -v func &> /dev/null; then
-    func azure functionapp publish "$FUNCTION_APP_NAME" --typescript
-    if [ $? -eq 0 ]; then
-        print_info "Backend deployed successfully"
-    else
-        print_error "Backend deployment failed"
-    fi
-else
-    print_warning "Azure Functions Core Tools not found. Skipping automatic backend deployment."
-    print_info "Install from: https://docs.microsoft.com/en-us/azure/azure-functions/functions-run-local"
-    print_info "Then run: func azure functionapp publish $FUNCTION_APP_NAME"
-fi
-
-cd ..
-
-# Configure Azure AD and Function App
+# Configure Azure AD and Function App FIRST (before backend deployment)
 print_section "Configuring Azure AD App Registration"
 
 print_info "Updating Azure AD app registration with SPA redirect URI: $STATIC_WEB_APP_URL"
@@ -253,6 +227,10 @@ print_info "Generating JWT secret..."
 JWT_SECRET=$(openssl rand -base64 32)
 
 print_info "Updating Function App environment variables..."
+
+# Construct PostgreSQL connection string in correct format for Node.js pg library
+POSTGRES_CONN_STRING="postgresql://cps230admin:${POSTGRES_PASSWORD}@${POSTGRES_FQDN}:5432/${POSTGRES_DB}?sslmode=require"
+
 az functionapp config appsettings set \
     --name "$FUNCTION_APP_NAME" \
     --resource-group "$RESOURCE_GROUP" \
@@ -262,6 +240,11 @@ az functionapp config appsettings set \
         JWT_SECRET="$JWT_SECRET" \
         ALLOWED_ORIGINS="$STATIC_WEB_APP_URL" \
         STATIC_WEB_APP_URL="$STATIC_WEB_APP_URL" \
+        POSTGRESQL_CONNECTION_STRING="$POSTGRES_CONN_STRING" \
+        POSTGRES_HOST="$POSTGRES_FQDN" \
+        POSTGRES_DB="$POSTGRES_DB" \
+        POSTGRES_USER="cps230admin" \
+        POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
     --output table
 
 if [ $? -eq 0 ]; then
@@ -269,6 +252,45 @@ if [ $? -eq 0 ]; then
 else
     print_error "Function App settings update failed"
 fi
+
+print_info "Configuring Function App CORS..."
+az functionapp cors add \
+    --name "$FUNCTION_APP_NAME" \
+    --resource-group "$RESOURCE_GROUP" \
+    --allowed-origins "$STATIC_WEB_APP_URL" \
+    2>/dev/null
+
+if [ $? -eq 0 ]; then
+    print_info "CORS configured successfully"
+else
+    print_warning "CORS configuration may have failed - check Azure Portal if needed"
+fi
+
+# Deploy backend AFTER configuring environment variables
+print_section "Deploying Backend Functions"
+
+print_info "Installing backend dependencies..."
+cd backend
+npm install
+
+print_info "Building backend..."
+npm run build
+
+print_info "Deploying to Azure Functions..."
+if command -v func &> /dev/null; then
+    func azure functionapp publish "$FUNCTION_APP_NAME" --typescript
+    if [ $? -eq 0 ]; then
+        print_info "Backend deployed successfully"
+    else
+        print_error "Backend deployment failed"
+    fi
+else
+    print_warning "Azure Functions Core Tools not found. Skipping automatic backend deployment."
+    print_info "Install from: https://docs.microsoft.com/en-us/azure/azure-functions/functions-run-local"
+    print_info "Then run: func azure functionapp publish $FUNCTION_APP_NAME"
+fi
+
+cd ..
 
 # Deploy frontend
 print_section "Deploying Frontend Application"
