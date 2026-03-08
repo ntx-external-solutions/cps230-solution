@@ -14,6 +14,21 @@ import { ValidationError } from '../shared/validation';
 import { PoolClient } from 'pg';
 
 /**
+ * Maps regional site URLs to their corresponding search service endpoints
+ */
+function getSearchEndpoint(siteUrl: string): string {
+  const regionMap: Record<string, string> = {
+    'demo.promapp.com': 'dmo-wus-sch.promapp.io',
+    'us.promapp.com': 'prd-wus-sch.promapp.io',
+    'ca.promapp.com': 'prd-cac-sch.promapp.io',
+    'eu.promapp.com': 'prd-neu-sch.promapp.io',
+    'au.promapp.com': 'prd-aus-sch.promapp.io',
+  };
+
+  return regionMap[siteUrl] || 'prd-wus-sch.promapp.io';
+}
+
+/**
  * Sync Process Manager HTTP trigger function
  * Handles synchronization with Nintex Process Manager
  */
@@ -209,7 +224,9 @@ async function handleSync(
     });
 
     // Step 1: Authenticate with Process Manager using OAuth2
-    const tokenUrl = `https://${siteUrl}/oauth2/token`;
+    // Construct full URL: regional domain + site identifier
+    const fullSiteUrl = `${siteUrl}/${tenantId}`;
+    const tokenUrl = `https://${fullSiteUrl}/oauth2/token`;
     const authBody = new URLSearchParams({
       grant_type: 'password',
       username: username,
@@ -240,20 +257,43 @@ async function handleSync(
 
     context.log('Successfully authenticated with Process Manager');
 
-    // Step 2: Search for all processes from the Process Manager site
-    const searchUrl = `https://${siteUrl}/api/Search/Search`;
-    const searchParams = new URLSearchParams({
-      query: '', // Empty query to fetch all processes
-      page: '1',
-      pagesize: '100', // Fetch up to 100 processes
-    });
-
-    context.log('Searching for all processes from Process Manager site...');
-    const searchResponse = await fetch(`${searchUrl}?${searchParams}`, {
+    // Step 2: Get search service token
+    const searchTokenUrl = `https://${fullSiteUrl}/search/GetSearchServiceToken`;
+    context.log('Getting search service token...');
+    const searchTokenResponse = await fetch(searchTokenUrl, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!searchTokenResponse.ok) {
+      const errorText = await searchTokenResponse.text();
+      throw new Error(`Failed to get search token: ${searchTokenResponse.status} ${searchTokenResponse.statusText} - ${errorText}`);
+    }
+
+    const searchToken = await searchTokenResponse.text(); // Returns plain text token
+    context.log('Successfully obtained search service token');
+
+    // Step 3: Map site URL to search endpoint
+    const searchEndpoint = getSearchEndpoint(siteUrl);
+    context.log(`Using search endpoint: ${searchEndpoint}`);
+
+    // Step 4: Search for processes tagged with #CPS230
+    const searchUrl = `https://${searchEndpoint}/fullsearch`;
+    const searchParams = new URLSearchParams({
+      SearchCriteria: '#CPS230',
+      IncludedTypes: '1', // 1 = processes
+      SearchMatchType: '0',
+      pageNumber: '1',
+      PageSize: '100',
+    });
+
+    context.log('Searching for #CPS230 tagged processes...');
+    const searchResponse = await fetch(`${searchUrl}?${searchParams}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${searchToken}`,
       },
     });
 
@@ -263,11 +303,16 @@ async function handleSync(
     }
 
     const searchData = await searchResponse.json() as any;
-    const processes = searchData.results || [];
 
-    context.log(`Found ${processes.length} processes`);
+    // Extract process unique IDs from search results
+    const allHighlights = searchData?.response || [];
+    const processUniqueIds = allHighlights
+      .filter((result: any) => result.highlightedResult?.toLowerCase().includes('cps230'))
+      .map((result: any) => result.id);
 
-    if (processes.length === 0) {
+    context.log(`Found ${processUniqueIds.length} processes with #CPS230 tag`);
+
+    if (processUniqueIds.length === 0) {
       await client.query(
         `UPDATE sync_history SET
           status = $1,
@@ -275,14 +320,14 @@ async function handleSync(
           error_message = $3,
           completed_at = NOW()
         WHERE id = $4`,
-        ['success', 0, 'No processes found in Process Manager', syncHistoryId]
+        ['success', 0, 'No CPS230 tagged processes found in Process Manager', syncHistoryId]
       );
 
       return {
         status: 200,
         headers: corsHeaders,
         jsonBody: {
-          message: 'No processes found in Process Manager site.',
+          message: 'No CPS230 tagged processes found in Process Manager site.',
           syncHistoryId,
           status: 'success',
           recordsSynced: 0,
@@ -290,14 +335,15 @@ async function handleSync(
       };
     }
 
-    // Step 3: Process each result and store in database
+    // Step 6: Fetch detailed process data for each unique ID and store in database
     let recordsSynced = 0;
     const errors: string[] = [];
 
-    for (const process of processes) {
+    for (const processUniqueId of processUniqueIds) {
       try {
-        // Fetch detailed process data
-        const processUrl = `https://${siteUrl}/Process/Index/${process.uniqueId}`;
+        // Fetch detailed process data using the site token (not search token)
+        const processUrl = `https://${fullSiteUrl}/api/process/${processUniqueId}`;
+        context.log(`Fetching process details for ${processUniqueId}...`);
         const processResponse = await fetch(processUrl, {
           method: 'GET',
           headers: {
@@ -307,15 +353,16 @@ async function handleSync(
         });
 
         if (!processResponse.ok) {
-          errors.push(`Failed to fetch process ${process.name}: ${processResponse.statusText}`);
+          const errorText = await processResponse.text();
+          context.error(`Failed to fetch process ${processUniqueId}: ${processResponse.status} - ${errorText}`);
+          errors.push(`Process ${processUniqueId}: ${processResponse.statusText}`);
           continue;
         }
 
         const processData = await processResponse.json() as any;
 
         // Extract tags from process data
-        // Tags may come from process.tags, processData.tags, or process.tagList
-        const tags = processData.tags || process.tags || processData.tagList || process.tagList || [];
+        const tags = processData.tags || processData.tagList || [];
         const tagArray = Array.isArray(tags) ? tags : [];
 
         // Check if #CPS230 tag exists
@@ -324,23 +371,17 @@ async function handleSync(
         );
 
         // Extract process expert
-        // May come from expertName, processExpert, expert, or other fields
-        const processExpert = processData.expertName || process.expertName ||
-                             processData.processExpert || process.processExpert ||
-                             processData.expert || process.expert || null;
+        const processExpert = processData.expertName || processData.processExpert ||
+                             processData.expert || null;
 
         // Extract process status
-        // May come from status, publishState, or other fields
-        const processStatus = processData.status || process.status ||
-                             processData.publishState || process.publishState || null;
+        const processStatus = processData.status || processData.publishState || null;
 
         // Extract full owner and expert objects if available
-        const ownerData = processData.owner || process.owner || null;
-        const expertData = processData.expertData || process.expertData ||
-                          processData.expert || process.expert || null;
+        const ownerData = processData.owner || null;
+        const expertData = processData.expertData || processData.expert || null;
 
         // Extract process metadata (inputs, outputs, triggers, targets)
-        // These come from the processJson object in the response
         const processJson = processData.processJson || processData;
 
         const inputs = processJson.Inputs?.Input || null;
@@ -386,16 +427,16 @@ async function handleSync(
             modified_date = NOW()
           `,
           [
-            processData.name || process.name,
-            process.uniqueId,
-            processData.ownerName || process.ownerName || null,
+            processData.name,
+            processUniqueId,
+            processData.ownerName || null,
             processExpert,
             processStatus,
             ownerData ? JSON.stringify(ownerData) : null,
             expertData ? JSON.stringify(expertData) : null,
             JSON.stringify({
-              referenceNo: processData.referenceNo || process.referenceNo,
-              processGroup: processData.processGroupName || process.processGroupName,
+              referenceNo: processData.referenceNo,
+              processGroup: processData.processGroupName,
               version: processData.version,
               publishState: processData.publishState,
             }),
@@ -409,10 +450,11 @@ async function handleSync(
           ]
         );
 
+        context.log(`Successfully synced process: ${processData.name}`);
         recordsSynced++;
       } catch (error: any) {
-        context.error(`Error processing process ${process.name}:`, error);
-        errors.push(`${process.name}: ${error.message}`);
+        context.error(`Error processing process ${processUniqueId}:`, error);
+        errors.push(`${processUniqueId}: ${error.message}`);
       }
     }
 
@@ -450,7 +492,7 @@ async function handleSync(
         syncHistoryId,
         status: 'success',
         recordsSynced,
-        totalFound: processes.length,
+        totalFound: processUniqueIds.length,
         errors: errors.length > 0 ? errors : undefined,
       },
     };
