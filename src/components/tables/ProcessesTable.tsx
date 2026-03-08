@@ -93,6 +93,35 @@ export function ProcessesTable() {
       },
     },
     {
+      accessorKey: 'process_expert',
+      header: 'Expert',
+      cell: ({ row }) => {
+        const expert = row.getValue('process_expert') as string | null;
+        return (
+          <div className="text-sm">{expert || <span className="text-muted-foreground">—</span>}</div>
+        );
+      },
+    },
+    {
+      accessorKey: 'process_status',
+      header: 'Status',
+      cell: ({ row }) => {
+        const status = row.getValue('process_status') as string | null;
+        if (!status) return <span className="text-muted-foreground text-sm">—</span>;
+
+        // Color-code status badges
+        const statusVariant = status.toLowerCase().includes('publish') ? 'default' :
+                             status.toLowerCase().includes('draft') ? 'secondary' :
+                             status.toLowerCase().includes('archive') ? 'outline' : 'secondary';
+
+        return (
+          <Badge variant={statusVariant} className="text-xs">
+            {status}
+          </Badge>
+        );
+      },
+    },
+    {
       accessorKey: 'systems',
       header: 'Associated Systems',
       cell: ({ row }) => {

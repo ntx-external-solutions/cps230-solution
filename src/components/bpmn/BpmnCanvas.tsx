@@ -11,6 +11,19 @@ import { Save, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSettings, useUpdateSetting } from '@/hooks/useSettings';
 
+/**
+ * Escape HTML to prevent XSS attacks
+ * Sanitizes user-controlled data before rendering in BPMN overlays
+ */
+function escapeHtml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 interface ProcessData {
   id: string;
   process_name: string;
@@ -90,11 +103,8 @@ export function BpmnCanvas({
     if (savedDiagramXml) {
       // Use saved diagram if available
       bpmnXml = savedDiagramXml;
-    } else if (processes.length > 0) {
-      // Generate from processes if no saved diagram (initial state)
-      bpmnXml = generateBpmnFromProcesses(processes);
     } else {
-      // Empty diagram
+      // Always start with empty diagram - users will manually add elements
       bpmnXml = generateEmptyDiagram();
     }
 
@@ -115,10 +125,9 @@ export function BpmnCanvas({
         const element = newSelection[0];
         setSelectedElement(element);
 
-        // Extract process ID from Call Activity
-        if (element.type === 'bpmn:CallActivity') {
-          const modeling = modeler.get('modeling') as any;
-          const processId = element.businessObject.calledElement;
+        // Extract process ID from Task or Group (stored in custom property)
+        if (element.type === 'bpmn:Task' || element.type === 'bpmn:Group') {
+          const processId = element.businessObject.get('linkedProcessId');
           setSelectedProcessId(processId || null);
         } else {
           setSelectedProcessId(null);
@@ -155,7 +164,7 @@ export function BpmnCanvas({
 
     // Reset all element styles
     elementRegistry.forEach((element: any) => {
-      if (element.type === 'bpmn:CallActivity') {
+      if (element.type === 'bpmn:Task' || element.type === 'bpmn:Group') {
         canvas.removeMarker(element, 'highlight-system');
         canvas.removeMarker(element, 'highlight-control');
         canvas.removeMarker(element, 'highlight-critical');
@@ -167,14 +176,16 @@ export function BpmnCanvas({
       filters.systems.length > 0 ||
       filters.regions.length > 0 ||
       filters.controls.length > 0 ||
-      filters.criticalOperations.length > 0;
+      filters.criticalOperations.length > 0 ||
+      filters.owners.length > 0 ||
+      filters.experts.length > 0;
 
     if (!hasActiveFilters) return;
 
     elementRegistry.forEach((element: any) => {
-      if (element.type !== 'bpmn:CallActivity') return;
+      if (element.type !== 'bpmn:Task' && element.type !== 'bpmn:Group') return;
 
-      const processId = element.businessObject.calledElement;
+      const processId = element.businessObject.get('linkedProcessId');
       const processData = processes.find(p => p.id === processId);
 
       if (!processData) return;
@@ -224,7 +235,7 @@ export function BpmnCanvas({
               white-space: nowrap;
               box-shadow: 0 1px 3px rgba(0,0,0,0.3);
             ">
-              ${matchedSystems.map(s => s.system_name).join(', ')}
+              ${escapeHtml(matchedSystems.map(s => s.system_name).join(', '))}
             </div>
           `;
 
@@ -253,13 +264,67 @@ export function BpmnCanvas({
               white-space: nowrap;
               box-shadow: 0 1px 3px rgba(0,0,0,0.3);
             ">
-              ${matchedRegions.join(', ')}
+              ${escapeHtml(matchedRegions.join(', '))}
             </div>
           `;
 
           overlays.add(element, {
             position: { top: -5, right: 10 },
             html: regionHtml
+          });
+        }
+      }
+
+      // Check Process Owner (OVERLAY - independent of border)
+      if (filters.owners.length > 0 && processData.owner_username) {
+        const matchesOwner = filters.owners.includes(processData.owner_username);
+
+        if (matchesOwner) {
+          const ownerHtml = `
+            <div style="
+              background: rgba(147, 51, 234, 0.9);
+              color: white;
+              padding: 2px 6px;
+              border-radius: 3px;
+              font-size: 10px;
+              font-weight: 500;
+              white-space: nowrap;
+              box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            ">
+              Owner: ${escapeHtml(processData.owner_username)}
+            </div>
+          `;
+
+          overlays.add(element, {
+            position: { top: -5, left: 10 },
+            html: ownerHtml
+          });
+        }
+      }
+
+      // Check Process Expert (OVERLAY - independent of border)
+      if (filters.experts.length > 0 && (processData as any).process_expert) {
+        const matchesExpert = filters.experts.includes((processData as any).process_expert);
+
+        if (matchesExpert) {
+          const expertHtml = `
+            <div style="
+              background: rgba(249, 115, 22, 0.9);
+              color: white;
+              padding: 2px 6px;
+              border-radius: 3px;
+              font-size: 10px;
+              font-weight: 500;
+              white-space: nowrap;
+              box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            ">
+              Expert: ${escapeHtml((processData as any).process_expert)}
+            </div>
+          `;
+
+          overlays.add(element, {
+            position: { bottom: -5, left: 10 },
+            html: expertHtml
           });
         }
       }
@@ -271,17 +336,80 @@ export function BpmnCanvas({
     if (!modelerRef.current || !selectedElement) return;
 
     const modeling = modelerRef.current.get('modeling') as any;
+    const moddle = modelerRef.current.get('moddle') as any;
     const process = processes.find(p => p.id === processId);
 
     if (!process) return;
 
-    // Update Call Activity with process information
+    // Update Task or Group with process information
+    // Store linkedProcessId as a custom attribute
+    const businessObject = selectedElement.businessObject;
+    businessObject.set('linkedProcessId', process.id);
+
+    // For Groups, update the categoryValue name; for Tasks, update the element name
+    if (selectedElement.type === 'bpmn:Group') {
+      const categoryValue = businessObject.categoryValueRef;
+      if (categoryValue) {
+        categoryValue.value = process.process_name;
+      }
+    }
+
     modeling.updateProperties(selectedElement, {
-      name: process.process_name,
-      calledElement: process.id
+      name: process.process_name
     });
 
     setSelectedProcessId(processId);
+  };
+
+  // Handle font size changes
+  const handleFontSizeChange = (fontSize: number) => {
+    if (!modelerRef.current || !selectedElement) return;
+
+    const modeling = modelerRef.current.get('modeling') as any;
+    const graphicsFactory = modelerRef.current.get('graphicsFactory') as any;
+
+    // Store font size in custom attribute
+    selectedElement.businessObject.set('fontSize', fontSize);
+
+    // Trigger re-render by updating a property
+    modeling.updateProperties(selectedElement, {
+      'custom:fontSize': fontSize
+    });
+
+    // Apply CSS styling directly to the element
+    const elementRegistry = modelerRef.current.get('elementRegistry') as any;
+    const gfx = elementRegistry.getGraphics(selectedElement);
+    if (gfx) {
+      const textElement = gfx.querySelector('text');
+      if (textElement) {
+        textElement.style.fontSize = `${fontSize}px`;
+      }
+    }
+
+    setHasUnsavedChanges(true);
+  };
+
+  // Handle border style changes (Group elements only)
+  const handleBorderStyleChange = (borderStyle: 'dashed' | 'solid') => {
+    if (!modelerRef.current || !selectedElement || selectedElement.type !== 'bpmn:Group') return;
+
+    const modeling = modelerRef.current.get('modeling') as any;
+    const canvas = modelerRef.current.get('canvas') as any;
+
+    // Store border style in custom attribute
+    selectedElement.businessObject.set('borderStyle', borderStyle);
+
+    // Apply styling via marker class
+    canvas.removeMarker(selectedElement, 'group-border-dashed');
+    canvas.removeMarker(selectedElement, 'group-border-solid');
+
+    if (borderStyle === 'solid') {
+      canvas.addMarker(selectedElement, 'group-border-solid');
+    } else {
+      canvas.addMarker(selectedElement, 'group-border-dashed');
+    }
+
+    setHasUnsavedChanges(true);
   };
 
   if (error) {
@@ -327,7 +455,7 @@ export function BpmnCanvas({
           className="w-full h-full"
         />
 
-        {/* Add custom CSS for highlighting */}
+        {/* Add custom CSS for highlighting and styling */}
         <style>{`
           .highlight-control .djs-visual > :nth-child(1) {
             stroke: #3b82f6 !important;
@@ -340,6 +468,15 @@ export function BpmnCanvas({
             stroke-width: 2 !important;
           }
 
+          /* Group border style customization */
+          .group-border-solid .djs-visual > :nth-child(1) {
+            stroke-dasharray: none !important;
+          }
+
+          .group-border-dashed .djs-visual > :nth-child(1) {
+            stroke-dasharray: 10, 5 !important;
+          }
+
           /* Hide BPMN.io logo/reference */
           .bjs-powered-by {
             display: none !important;
@@ -347,12 +484,15 @@ export function BpmnCanvas({
         `}</style>
       </div>
 
-      {/* Properties Panel (shown for all users when element is selected) */}
-      {selectedElement?.type === 'bpmn:CallActivity' && (
+      {/* Properties Panel (shown for all users when Task or Group element is selected) */}
+      {(selectedElement?.type === 'bpmn:Task' || selectedElement?.type === 'bpmn:Group') && (
         <ProcessPropertiesPanel
           selectedProcessId={selectedProcessId}
+          selectedElement={selectedElement}
           processes={processes}
           onProcessLink={handleProcessLink}
+          onFontSizeChange={canEdit ? handleFontSizeChange : undefined}
+          onBorderStyleChange={canEdit ? handleBorderStyleChange : undefined}
           onClose={() => {
             const selection = modelerRef.current?.get('selection') as any;
             selection?.deselect(selectedElement);

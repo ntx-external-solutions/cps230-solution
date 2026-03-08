@@ -42,10 +42,21 @@ export interface Database {
           process_unique_id: string
           pm_process_id: number | null
           owner_username: string | null
+          process_expert: string | null
+          process_status: string | null
+          process_owner_data: Json | null
+          process_expert_data: Json | null
           input_processes: string[] | null
           output_processes: string[] | null
           canvas_position: Json | null
           metadata: Json | null
+          regions: string[] | null
+          is_cps230_tagged: boolean
+          tags: string[] | null
+          inputs: Json | null
+          outputs: Json | null
+          triggers: Json | null
+          targets: Json | null
           modified_by: string
           modified_date: string
           created_at: string
@@ -57,10 +68,21 @@ export interface Database {
           process_unique_id: string
           pm_process_id?: number | null
           owner_username?: string | null
+          process_expert?: string | null
+          process_status?: string | null
+          process_owner_data?: Json | null
+          process_expert_data?: Json | null
           input_processes?: string[] | null
           output_processes?: string[] | null
           canvas_position?: Json | null
           metadata?: Json | null
+          regions?: string[] | null
+          is_cps230_tagged?: boolean
+          tags?: string[] | null
+          inputs?: Json | null
+          outputs?: Json | null
+          triggers?: Json | null
+          targets?: Json | null
           modified_by: string
           modified_date?: string
           created_at?: string
@@ -72,10 +94,21 @@ export interface Database {
           process_unique_id?: string
           pm_process_id?: number | null
           owner_username?: string | null
+          process_expert?: string | null
+          process_status?: string | null
+          process_owner_data?: Json | null
+          process_expert_data?: Json | null
           input_processes?: string[] | null
           output_processes?: string[] | null
           canvas_position?: Json | null
           metadata?: Json | null
+          regions?: string[] | null
+          is_cps230_tagged?: boolean
+          tags?: string[] | null
+          inputs?: Json | null
+          outputs?: Json | null
+          triggers?: Json | null
+          targets?: Json | null
           modified_by?: string
           modified_date?: string
           created_at?: string

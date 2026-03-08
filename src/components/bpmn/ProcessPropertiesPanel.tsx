@@ -9,30 +9,77 @@ import { X, Copy, Check, ChevronDown, ChevronRight, ExternalLink } from 'lucide-
 import { useSettings } from '@/hooks/useSettings';
 import { toast } from 'sonner';
 
+interface ProcessInput {
+  Id: number;
+  FromProcess: string;
+  FromProcessId: number;
+  FromProcessUniqueId: string;
+  Resource: string;
+  HowUsed: string;
+  UniqueId: string;
+}
+
+interface ProcessOutput {
+  Id: number;
+  Output: string;
+  HowUsed: string;
+  ToProcess: string;
+  ToProcessId: number;
+  ToProcessUniqueId: string;
+  UniqueId: string;
+}
+
+interface ProcessTrigger {
+  Id: number;
+  UniqueId: string;
+  Trigger: string;
+  Frequency: string;
+  Volume: string;
+}
+
+interface ProcessTarget {
+  Id: number;
+  Measure: string;
+  Target: string;
+  UniqueId: string;
+}
+
 interface Process {
   id: string;
   process_name: string;
   process_unique_id: string;
   pm_process_id?: number | null;
   owner_username?: string | null;
+  process_expert?: string | null;
+  process_status?: string | null;
   regions?: string[] | null;
   systems?: Array<{ id: string; system_name: string }>;
   controls?: Array<{ id: string; control_name: string }>;
   criticalOperations?: Array<{ id: string; operation_name: string }>;
+  inputs?: ProcessInput[] | null;
+  outputs?: ProcessOutput[] | null;
+  triggers?: ProcessTrigger[] | null;
+  targets?: ProcessTarget[] | null;
 }
 
 interface ProcessPropertiesPanelProps {
   selectedProcessId: string | null;
+  selectedElement: any; // BPMN element
   processes: Process[];
   onProcessLink: (processId: string) => void;
+  onFontSizeChange?: (fontSize: number) => void;
+  onBorderStyleChange?: (borderStyle: 'dashed' | 'solid') => void;
   onClose: () => void;
   readOnly?: boolean;
 }
 
 export function ProcessPropertiesPanel({
   selectedProcessId,
+  selectedElement,
   processes,
   onProcessLink,
+  onFontSizeChange,
+  onBorderStyleChange,
   onClose,
   readOnly = false
 }: ProcessPropertiesPanelProps) {
@@ -41,8 +88,17 @@ export function ProcessPropertiesPanel({
     criticalOps: true,
     controls: false,
     systems: false,
-    regions: false
+    regions: false,
+    inputs: false,
+    outputs: false,
+    triggers: false,
+    targets: false
   });
+
+  // Get current styling properties from element
+  const currentFontSize = selectedElement?.businessObject?.get('fontSize') || 12;
+  const currentBorderStyle = selectedElement?.businessObject?.get('borderStyle') || 'dashed';
+  const isGroupElement = selectedElement?.type === 'bpmn:Group';
 
   // Get site URL and tenant ID from settings
   const { data: settings } = useSettings(['pm_site_url', 'pm_tenant_id']);
@@ -106,6 +162,54 @@ export function ProcessPropertiesPanel({
         </CardHeader>
 
         <CardContent className="space-y-4">
+          {/* Element Styling Controls - only for editors */}
+          {!readOnly && (
+            <div className="space-y-3 pb-3 border-b">
+              <h4 className="text-sm font-semibold">Element Styling</h4>
+
+              {/* Font Size Control */}
+              <div className="space-y-2">
+                <Label htmlFor="fontSize" className="text-xs">Font Size</Label>
+                <Select
+                  value={currentFontSize.toString()}
+                  onValueChange={(value) => onFontSizeChange?.(parseInt(value))}
+                >
+                  <SelectTrigger id="fontSize" className="text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10px</SelectItem>
+                    <SelectItem value="12">12px (Default)</SelectItem>
+                    <SelectItem value="14">14px</SelectItem>
+                    <SelectItem value="16">16px</SelectItem>
+                    <SelectItem value="18">18px</SelectItem>
+                    <SelectItem value="20">20px</SelectItem>
+                    <SelectItem value="24">24px</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Border Style Control - only for Group elements */}
+              {isGroupElement && (
+                <div className="space-y-2">
+                  <Label htmlFor="borderStyle" className="text-xs">Border Style</Label>
+                  <Select
+                    value={currentBorderStyle}
+                    onValueChange={(value) => onBorderStyleChange?.(value as 'dashed' | 'solid')}
+                  >
+                    <SelectTrigger id="borderStyle" className="text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dashed">Dashed (Default)</SelectItem>
+                      <SelectItem value="solid">Solid</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Process Selector - only for editors */}
           {!readOnly && (
             <div className="space-y-2">
@@ -176,6 +280,31 @@ export function ProcessPropertiesPanel({
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Owner</Label>
                   <p className="text-sm">{selectedProcess.owner_username}</p>
+                </div>
+              )}
+
+              {/* Expert */}
+              {selectedProcess.process_expert && (
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Process Expert</Label>
+                  <p className="text-sm">{selectedProcess.process_expert}</p>
+                </div>
+              )}
+
+              {/* Status */}
+              {selectedProcess.process_status && (
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Status</Label>
+                  <Badge
+                    variant={
+                      selectedProcess.process_status.toLowerCase().includes('publish') ? 'default' :
+                      selectedProcess.process_status.toLowerCase().includes('draft') ? 'secondary' :
+                      selectedProcess.process_status.toLowerCase().includes('archive') ? 'outline' : 'secondary'
+                    }
+                    className="text-xs"
+                  >
+                    {selectedProcess.process_status}
+                  </Badge>
                 </div>
               )}
 
@@ -285,6 +414,149 @@ export function ProcessPropertiesPanel({
                         <Badge key={region} variant="secondary" className="text-xs">
                           {region}
                         </Badge>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+
+              {/* Process Inputs */}
+              {selectedProcess.inputs && selectedProcess.inputs.length > 0 && (
+                <Collapsible open={openSections.inputs} onOpenChange={() => toggleSection('inputs')}>
+                  <CollapsibleTrigger className="flex items-center justify-between w-full hover:bg-muted/50 p-2 rounded -mx-2">
+                    <Label className="text-xs text-muted-foreground cursor-pointer">Inputs</Label>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="default" className="text-xs bg-indigo-600">
+                        {selectedProcess.inputs.length}
+                      </Badge>
+                      {openSections.inputs ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-2">
+                    <div className="flex flex-col gap-2">
+                      {selectedProcess.inputs.map((input) => (
+                        <div key={input.UniqueId} className="p-2 bg-muted/50 rounded text-xs space-y-1">
+                          <div className="flex items-center gap-1">
+                            <span className="font-semibold">From:</span>
+                            <a
+                              href={`${baseUrl}/Process/${input.FromProcessUniqueId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline flex items-center gap-1"
+                            >
+                              {input.FromProcess}
+                              <ExternalLink className="h-2.5 w-2.5" />
+                            </a>
+                          </div>
+                          <div><span className="font-semibold">Resource:</span> {input.Resource}</div>
+                          {input.HowUsed && <div><span className="font-semibold">How Used:</span> {input.HowUsed}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+
+              {/* Process Outputs */}
+              {selectedProcess.outputs && selectedProcess.outputs.length > 0 && (
+                <Collapsible open={openSections.outputs} onOpenChange={() => toggleSection('outputs')}>
+                  <CollapsibleTrigger className="flex items-center justify-between w-full hover:bg-muted/50 p-2 rounded -mx-2">
+                    <Label className="text-xs text-muted-foreground cursor-pointer">Outputs</Label>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="default" className="text-xs bg-teal-600">
+                        {selectedProcess.outputs.length}
+                      </Badge>
+                      {openSections.outputs ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-2">
+                    <div className="flex flex-col gap-2">
+                      {selectedProcess.outputs.map((output) => (
+                        <div key={output.UniqueId} className="p-2 bg-muted/50 rounded text-xs space-y-1">
+                          <div className="flex items-center gap-1">
+                            <span className="font-semibold">To:</span>
+                            <a
+                              href={`${baseUrl}/Process/${output.ToProcessUniqueId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline flex items-center gap-1"
+                            >
+                              {output.ToProcess}
+                              <ExternalLink className="h-2.5 w-2.5" />
+                            </a>
+                          </div>
+                          <div><span className="font-semibold">Output:</span> {output.Output}</div>
+                          {output.HowUsed && <div><span className="font-semibold">How Used:</span> {output.HowUsed}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+
+              {/* Process Triggers */}
+              {selectedProcess.triggers && selectedProcess.triggers.length > 0 && (
+                <Collapsible open={openSections.triggers} onOpenChange={() => toggleSection('triggers')}>
+                  <CollapsibleTrigger className="flex items-center justify-between w-full hover:bg-muted/50 p-2 rounded -mx-2">
+                    <Label className="text-xs text-muted-foreground cursor-pointer">Triggers</Label>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="default" className="text-xs bg-amber-600">
+                        {selectedProcess.triggers.length}
+                      </Badge>
+                      {openSections.triggers ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-2">
+                    <div className="flex flex-col gap-2">
+                      {selectedProcess.triggers.map((trigger) => (
+                        <div key={trigger.UniqueId} className="p-2 bg-muted/50 rounded text-xs space-y-1">
+                          <div><span className="font-semibold">Trigger:</span> {trigger.Trigger}</div>
+                          <div className="flex gap-3">
+                            <span><span className="font-semibold">Frequency:</span> {trigger.Frequency}</span>
+                            {trigger.Volume && <span><span className="font-semibold">Volume:</span> {trigger.Volume}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+
+              {/* Process Targets */}
+              {selectedProcess.targets && selectedProcess.targets.length > 0 && (
+                <Collapsible open={openSections.targets} onOpenChange={() => toggleSection('targets')}>
+                  <CollapsibleTrigger className="flex items-center justify-between w-full hover:bg-muted/50 p-2 rounded -mx-2">
+                    <Label className="text-xs text-muted-foreground cursor-pointer">Targets</Label>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="default" className="text-xs bg-rose-600">
+                        {selectedProcess.targets.length}
+                      </Badge>
+                      {openSections.targets ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-2">
+                    <div className="flex flex-col gap-2">
+                      {selectedProcess.targets.map((target) => (
+                        <div key={target.UniqueId} className="p-2 bg-muted/50 rounded text-xs space-y-1">
+                          <div><span className="font-semibold">Measure:</span> {target.Measure}</div>
+                          <div><span className="font-semibold">Target:</span> {target.Target}</div>
+                        </div>
                       ))}
                     </div>
                   </CollapsibleContent>

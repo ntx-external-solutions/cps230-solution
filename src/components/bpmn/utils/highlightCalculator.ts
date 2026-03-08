@@ -8,6 +8,8 @@ export interface FilterState {
   regions: string[];
   controls: string[];
   criticalOperations: string[];
+  owners: string[];
+  experts: string[];
 }
 
 export interface HighlightStyle {

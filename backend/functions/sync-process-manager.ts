@@ -242,15 +242,15 @@ async function handleSync(
 
     context.log('Successfully authenticated with Process Manager');
 
-    // Step 2: Search for processes tagged with #CPS230
+    // Step 2: Search for all processes from the Process Manager site
     const searchUrl = `https://${siteUrl}/api/Search/Search`;
     const searchParams = new URLSearchParams({
-      query: '#CPS230',
+      query: '', // Empty query to fetch all processes
       page: '1',
       pagesize: '100', // Fetch up to 100 processes
     });
 
-    context.log('Searching for processes tagged with #CPS230...');
+    context.log('Searching for all processes from Process Manager site...');
     const searchResponse = await fetch(`${searchUrl}?${searchParams}`, {
       method: 'GET',
       headers: {
@@ -277,14 +277,14 @@ async function handleSync(
           error_message = $3,
           completed_at = NOW()
         WHERE id = $4`,
-        ['success', 0, 'No processes found with #CPS230 tag', syncHistoryId]
+        ['success', 0, 'No processes found in Process Manager', syncHistoryId]
       );
 
       return {
         status: 200,
         headers: corsHeaders,
         jsonBody: {
-          message: 'No processes found with #CPS230 tag. Please tag your processes in Process Manager.',
+          message: 'No processes found in Process Manager site.',
           syncHistoryId,
           status: 'success',
           recordsSynced: 0,
@@ -315,20 +315,75 @@ async function handleSync(
 
         const processData = await processResponse.json() as any;
 
+        // Extract tags from process data
+        // Tags may come from process.tags, processData.tags, or process.tagList
+        const tags = processData.tags || process.tags || processData.tagList || process.tagList || [];
+        const tagArray = Array.isArray(tags) ? tags : [];
+
+        // Check if #CPS230 tag exists
+        const isCPS230Tagged = tagArray.some((tag: string) =>
+          tag && tag.toLowerCase().includes('cps230')
+        );
+
+        // Extract process expert
+        // May come from expertName, processExpert, expert, or other fields
+        const processExpert = processData.expertName || process.expertName ||
+                             processData.processExpert || process.processExpert ||
+                             processData.expert || process.expert || null;
+
+        // Extract process status
+        // May come from status, publishState, or other fields
+        const processStatus = processData.status || process.status ||
+                             processData.publishState || process.publishState || null;
+
+        // Extract full owner and expert objects if available
+        const ownerData = processData.owner || process.owner || null;
+        const expertData = processData.expertData || process.expertData ||
+                          processData.expert || process.expert || null;
+
+        // Extract process metadata (inputs, outputs, triggers, targets)
+        // These come from the processJson object in the response
+        const processJson = processData.processJson || processData;
+
+        const inputs = processJson.Inputs?.Input || null;
+        const outputs = processJson.Outputs?.Output || null;
+        const triggers = processJson.Triggers?.Trigger || null;
+        const targets = processJson.Targets?.Target || null;
+
         // Upsert process to database
         await client.query(
           `INSERT INTO processes (
             process_name,
             process_unique_id,
             owner_username,
+            process_expert,
+            process_status,
+            process_owner_data,
+            process_expert_data,
             metadata,
+            is_cps230_tagged,
+            tags,
+            inputs,
+            outputs,
+            triggers,
+            targets,
             modified_by
-          ) VALUES ($1, $2, $3, $4, $5)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
           ON CONFLICT (process_unique_id)
           DO UPDATE SET
             process_name = EXCLUDED.process_name,
             owner_username = EXCLUDED.owner_username,
+            process_expert = EXCLUDED.process_expert,
+            process_status = EXCLUDED.process_status,
+            process_owner_data = EXCLUDED.process_owner_data,
+            process_expert_data = EXCLUDED.process_expert_data,
             metadata = EXCLUDED.metadata,
+            is_cps230_tagged = EXCLUDED.is_cps230_tagged,
+            tags = EXCLUDED.tags,
+            inputs = EXCLUDED.inputs,
+            outputs = EXCLUDED.outputs,
+            triggers = EXCLUDED.triggers,
+            targets = EXCLUDED.targets,
             modified_by = EXCLUDED.modified_by,
             modified_date = NOW()
           `,
@@ -336,12 +391,22 @@ async function handleSync(
             processData.name || process.name,
             process.uniqueId,
             processData.ownerName || process.ownerName || null,
+            processExpert,
+            processStatus,
+            ownerData ? JSON.stringify(ownerData) : null,
+            expertData ? JSON.stringify(expertData) : null,
             JSON.stringify({
               referenceNo: processData.referenceNo || process.referenceNo,
               processGroup: processData.processGroupName || process.processGroupName,
               version: processData.version,
               publishState: processData.publishState,
             }),
+            isCPS230Tagged,
+            tagArray,
+            inputs ? JSON.stringify(inputs) : null,
+            outputs ? JSON.stringify(outputs) : null,
+            triggers ? JSON.stringify(triggers) : null,
+            targets ? JSON.stringify(targets) : null,
             userProfile.email,
           ]
         );

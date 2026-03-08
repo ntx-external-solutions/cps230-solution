@@ -32,11 +32,21 @@ CREATE TABLE IF NOT EXISTS public.processes (
     process_name TEXT NOT NULL,
     process_unique_id TEXT NOT NULL UNIQUE, -- From Nintex Process Manager
     owner_username TEXT,
+    process_expert TEXT, -- Process expert name/email
+    process_status TEXT, -- Process status (Draft, Published, Archived, etc.)
+    process_owner_data JSONB, -- Full owner object from PM
+    process_expert_data JSONB, -- Full expert object from PM
     input_processes TEXT[], -- Array of process IDs that feed into this process
     output_processes TEXT[], -- Array of process IDs that this process feeds into
     canvas_position JSONB, -- Stores x, y coordinates for BPMN canvas
     metadata JSONB, -- Additional metadata from Nintex
     regions TEXT[], -- Array of region identifiers (e.g., ['AU', 'UK', 'US'])
+    is_cps230_tagged BOOLEAN DEFAULT FALSE, -- Flag for #CPS230 tagged processes
+    tags TEXT[], -- Array of all tags from Process Manager
+    inputs JSONB, -- Array of input objects with FromProcess, FromProcessUniqueId, Resource, HowUsed
+    outputs JSONB, -- Array of output objects with ToProcess, ToProcessUniqueId, Output, HowUsed
+    triggers JSONB, -- Array of trigger objects with Trigger, Frequency, Volume
+    targets JSONB, -- Array of target objects with Measure, Target
     modified_by TEXT NOT NULL,
     modified_date TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
@@ -312,6 +322,14 @@ CREATE INDEX idx_user_profiles_email ON public.user_profiles(email);
 CREATE INDEX idx_user_profiles_role ON public.user_profiles(role);
 CREATE INDEX idx_processes_unique_id ON public.processes(process_unique_id);
 CREATE INDEX idx_processes_owner ON public.processes(owner_username);
+CREATE INDEX idx_processes_expert ON public.processes(process_expert);
+CREATE INDEX idx_processes_status ON public.processes(process_status);
+CREATE INDEX idx_processes_cps230_tagged ON public.processes(is_cps230_tagged);
+CREATE INDEX idx_processes_tags ON public.processes USING GIN(tags);
+CREATE INDEX idx_processes_inputs ON public.processes USING GIN(inputs);
+CREATE INDEX idx_processes_outputs ON public.processes USING GIN(outputs);
+CREATE INDEX idx_processes_triggers ON public.processes USING GIN(triggers);
+CREATE INDEX idx_processes_targets ON public.processes USING GIN(targets);
 CREATE INDEX idx_systems_system_id ON public.systems(system_id);
 CREATE INDEX idx_critical_operations_name ON public.critical_operations(operation_name);
 CREATE INDEX idx_process_systems_process ON public.process_systems(process_id);

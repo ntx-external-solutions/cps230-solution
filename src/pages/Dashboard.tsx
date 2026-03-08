@@ -1,6 +1,6 @@
 import { AppLayout } from '@/components/AppLayout';
 import { BpmnCanvas } from '@/components/bpmn/BpmnCanvas';
-import { FiltersSidebar } from '@/components/bpmn/FiltersSidebar';
+import { FiltersTopBar } from '@/components/bpmn/FiltersTopBar';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -50,7 +50,9 @@ export default function Dashboard() {
     systems: [],
     regions: [],
     controls: [],
-    criticalOperations: []
+    criticalOperations: [],
+    owners: [],
+    experts: []
   });
 
   // Fetch regions from settings
@@ -84,6 +86,23 @@ export default function Dashboard() {
   const availableRegions = (settings.find(s => s.key === 'regions')?.value as Region[]) || [];
   const regions = availableRegions.map(r => r.name);
 
+  // Extract unique owners and experts from processes
+  const owners = Array.from(
+    new Set(
+      (processes || [])
+        .map(p => p.owner_username)
+        .filter((owner): owner is string => owner !== null && owner !== undefined && owner.trim() !== '')
+    )
+  ).sort();
+
+  const experts = Array.from(
+    new Set(
+      (processes || [])
+        .map(p => (p as any).process_expert)
+        .filter((expert): expert is string => expert !== null && expert !== undefined && expert.trim() !== '')
+    )
+  ).sort();
+
   const isLoading = systemsLoading || processesLoading || controlsLoading || criticalOpsLoading;
 
   const userRole = profile?.role || 'user';
@@ -96,13 +115,15 @@ export default function Dashboard() {
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <div className="flex h-full">
-            {/* Filters Sidebar */}
-            <FiltersSidebar
+          <div className="flex flex-col h-full">
+            {/* Filters Top Bar */}
+            <FiltersTopBar
               systems={systems || []}
               regions={regions}
               controls={controls || []}
               criticalOperations={criticalOperations || []}
+              owners={owners}
+              experts={experts}
               selectedFilters={filters}
               onFilterChange={setFilters}
             />
