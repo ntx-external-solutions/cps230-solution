@@ -267,28 +267,34 @@ export interface Database {
       user_profiles: {
         Row: {
           id: string
-          azure_ad_object_id: string
+          entra_id_object_id: string | null
           email: string
           full_name: string | null
           role: 'user' | 'business_analyst' | 'promaster'
+          auth_type: 'azure_sso' | 'local'
+          account_id: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
           id?: string
-          azure_ad_object_id: string
+          entra_id_object_id?: string | null
           email: string
           full_name?: string | null
           role?: 'user' | 'business_analyst' | 'promaster'
+          auth_type?: 'azure_sso' | 'local'
+          account_id?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
           id?: string
-          azure_ad_object_id?: string
+          entra_id_object_id?: string | null
           email?: string
           full_name?: string | null
           role?: 'user' | 'business_analyst' | 'promaster'
+          auth_type?: 'azure_sso' | 'local'
+          account_id?: string | null
           created_at?: string
           updated_at?: string
         }
