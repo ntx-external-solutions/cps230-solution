@@ -1,6 +1,13 @@
 # CPS230 Solution - Project Status
 
-## Completion Status: 85%
+> **⚠️ NOTE**: This document is outdated. It was created during the initial Supabase to Azure migration.
+>
+> For current status:
+> - See [DEPLOYMENT_STATUS.md](DEPLOYMENT_STATUS.md) for deployment readiness
+> - See [DUAL_AUTH_SETUP_GUIDE.md](DUAL_AUTH_SETUP_GUIDE.md) for authentication setup
+> - The project now uses **dual authentication** (Azure AD SSO + Local Database), not Azure AD B2C
+
+## Completion Status: 85% (AS OF INITIAL MIGRATION - NOW OUTDATED)
 
 ### ✅ Completed Components
 

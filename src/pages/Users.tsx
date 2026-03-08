@@ -1,314 +1,453 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/AppLayout';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useAuth } from '@/contexts/AuthContext';
-import azureApi from '@/lib/azureApi';
-import { userProfilesApi } from '@/lib/api';
-import { UserProfile, UserRole } from '@/types/database';
-import { Pencil, Trash2, UserPlus } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
+import { azureApi } from '@/lib/azureApi';
+import { UserPlus, Trash2, KeyRound, AlertCircle } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Switch } from '@/components/ui/switch';
 
-export default function Users() {
-  const { profile, isPromaster } = useAuth();
+interface AzureUser {
+  id: string;
+  displayName: string;
+  userPrincipalName: string;
+  accountEnabled: boolean;
+  createdDateTime: string;
+}
+
+interface CreateUserFormData {
+  email: string;
+  displayName: string;
+  password: string;
+  confirmPassword: string;
+  role: 'user' | 'business_analyst' | 'promaster';
+  forceChangePassword: boolean;
+  jobTitle?: string;
+  department?: string;
+}
+
+export default function UserManagement() {
   const { toast } = useToast();
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
-  const [addFormData, setAddFormData] = useState({
+  const queryClient = useQueryClient();
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [resetPasswordDialogOpen, setResetPasswordDialogOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<AzureUser | null>(null);
+
+  const [formData, setFormData] = useState<CreateUserFormData>({
     email: '',
+    displayName: '',
     password: '',
-    full_name: '',
-    role: 'user' as UserRole,
-  });
-  const [editFormData, setEditFormData] = useState({
-    full_name: '',
-    role: 'user' as UserRole,
+    confirmPassword: '',
+    role: 'user',
+    forceChangePassword: true,
   });
 
-  useEffect(() => {
-    if (profile) {
-      fetchUsers();
-    }
-  }, [profile]);
+  const [resetPasswordData, setResetPasswordData] = useState({
+    newPassword: '',
+    confirmPassword: '',
+    forceChangePassword: true,
+  });
 
-  const fetchUsers = async () => {
-    if (!profile) return;
+  // Fetch local users
+  const { data: users, isLoading, error } = useQuery({
+    queryKey: ['local-users'],
+    queryFn: async () => {
+      const response = await azureApi.get('/user-profiles');
+      if (response.error) throw new Error(response.error);
+      return response.data as AzureUser[];
+    },
+  });
 
-    try {
-      setLoading(true);
-      const data = await userProfilesApi.getAll();
-      setUsers(data || []);
-    } catch (error) {
-      console.error('Error fetching users:', error);
+  // Create user mutation
+  const createUserMutation = useMutation({
+    mutationFn: async (data: CreateUserFormData) => {
+      const response = await azureApi.post('/auth/local/users', {
+        email: data.email,
+        password: data.password,
+        full_name: data.displayName,
+        role: data.role,
+      });
+      if (response.error) throw new Error(response.error);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['local-users'] });
+      setCreateDialogOpen(false);
+      setFormData({
+        email: '',
+        displayName: '',
+        password: '',
+        confirmPassword: '',
+        role: 'user',
+        forceChangePassword: true,
+      });
+      toast({
+        title: 'User created',
+        description: 'Local user account has been created successfully',
+      });
+    },
+    onError: (error: Error) => {
       toast({
         title: 'Error',
-        description: 'Failed to load users',
+        description: error.message,
         variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+  });
 
-  const handleAddUser = async () => {
-    if (!profile) return;
-
-    // Validate inputs
-    if (!addFormData.email || !addFormData.password) {
+  // Delete user mutation
+  const deleteUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const response = await azureApi.delete(`/user-profiles/${userId}`);
+      if (response.error) throw new Error(response.error);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['local-users'] });
+      toast({
+        title: 'User deleted',
+        description: 'User has been deleted successfully',
+      });
+    },
+    onError: (error: Error) => {
       toast({
         title: 'Error',
-        description: 'Email and password are required',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Reset password mutation
+  const resetPasswordMutation = useMutation({
+    mutationFn: async ({ userId, data }: { userId: string; data: any }) => {
+      const response = await azureApi.patch(`/auth/local/users/${userId}/reset-password`, {
+        newPassword: data.newPassword,
+      });
+      if (response.error) throw new Error(response.error);
+      return response.data;
+    },
+    onSuccess: () => {
+      setResetPasswordDialogOpen(false);
+      setSelectedUser(null);
+      setResetPasswordData({
+        newPassword: '',
+        confirmPassword: '',
+        forceChangePassword: true,
+      });
+      toast({
+        title: 'Password reset',
+        description: 'User password has been reset successfully',
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const handleCreateUser = () => {
+    // Validation
+    if (!formData.email || !formData.displayName || !formData.password) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in all required fields',
         variant: 'destructive',
       });
       return;
     }
 
-    if (addFormData.password.length < 6) {
+    if (formData.password !== formData.confirmPassword) {
       toast({
-        title: 'Error',
-        description: 'Password must be at least 6 characters',
+        title: 'Validation Error',
+        description: 'Passwords do not match',
         variant: 'destructive',
       });
       return;
     }
 
-    try {
-      // Note: For Azure AD B2C, users are typically created through the Azure portal or B2C sign-up flow
-      // This creates/updates a user profile in our database
-      const response = await azureApi.createUser({
-        email: addFormData.email,
-        full_name: addFormData.full_name || null,
-        role: addFormData.role,
-        // Note: azure_ad_object_id should be obtained from actual Azure AD B2C user creation
-        // For now, we'll generate a placeholder - in production, this should come from Azure AD B2C
-        azure_ad_object_id: `placeholder_${Date.now()}`,
-      });
-
-      if (response.error) {
-        throw new Error(response.error);
-      }
-
+    if (formData.password.length < 8) {
       toast({
-        title: 'User Profile Created',
-        description: 'User profile created. User must sign up via Azure AD B2C to complete registration.',
-      });
-
-      setIsAddDialogOpen(false);
-      resetAddForm();
-      fetchUsers();
-    } catch (error: any) {
-      console.error('Error creating user:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to create user',
+        title: 'Validation Error',
+        description: 'Password must be at least 8 characters long',
         variant: 'destructive',
       });
+      return;
     }
+
+    createUserMutation.mutate(formData);
   };
 
-  const handleUpdateUser = async () => {
+  const handleResetPassword = () => {
     if (!selectedUser) return;
 
-    try {
-      await userProfilesApi.update(selectedUser.id, {
-        full_name: editFormData.full_name || null,
-        role: editFormData.role,
-      });
-
+    if (!resetPasswordData.newPassword) {
       toast({
-        title: 'Success',
-        description: 'User updated successfully',
-      });
-
-      setIsEditDialogOpen(false);
-      setSelectedUser(null);
-      resetEditForm();
-      fetchUsers();
-    } catch (error: any) {
-      console.error('Error updating user:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update user',
+        title: 'Validation Error',
+        description: 'Please enter a new password',
         variant: 'destructive',
       });
+      return;
     }
-  };
 
-  const handleDeleteUser = async () => {
-    if (!selectedUser) return;
-
-    try {
-      await userProfilesApi.delete(selectedUser.id);
-
+    if (resetPasswordData.newPassword !== resetPasswordData.confirmPassword) {
       toast({
-        title: 'Success',
-        description: 'User removed successfully',
-      });
-
-      setIsDeleteDialogOpen(false);
-      setSelectedUser(null);
-      fetchUsers();
-    } catch (error: any) {
-      console.error('Error deleting user:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to delete user',
+        title: 'Validation Error',
+        description: 'Passwords do not match',
         variant: 'destructive',
       });
+      return;
     }
-  };
 
-  const openEditDialog = (user: UserProfile) => {
-    setSelectedUser(user);
-    setEditFormData({
-      full_name: user.full_name || '',
-      role: user.role,
-    });
-    setIsEditDialogOpen(true);
-  };
+    if (resetPasswordData.newPassword.length < 8) {
+      toast({
+        title: 'Validation Error',
+        description: 'Password must be at least 8 characters long',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-  const openDeleteDialog = (user: UserProfile) => {
-    setSelectedUser(user);
-    setIsDeleteDialogOpen(true);
-  };
-
-  const resetAddForm = () => {
-    setAddFormData({
-      email: '',
-      password: '',
-      full_name: '',
-      role: 'user',
+    resetPasswordMutation.mutate({
+      userId: selectedUser.id,
+      data: resetPasswordData,
     });
   };
 
-  const resetEditForm = () => {
-    setEditFormData({
-      full_name: '',
-      role: 'user',
-    });
-  };
-
-  const getRoleLabel = (role: UserRole) => {
-    switch (role) {
-      case 'promaster':
-        return 'Promaster';
-      case 'business_analyst':
-        return 'Business Analyst';
-      case 'user':
-        return 'User';
-      default:
-        return role;
+  const handleDeleteUser = (user: AzureUser) => {
+    if (confirm(`Are you sure you want to delete user "${user.displayName}"? This action cannot be undone.`)) {
+      deleteUserMutation.mutate(user.id);
     }
   };
 
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-2xl font-bold">User Management</h2>
-            <p className="text-muted-foreground">
-              Manage user access and permissions
+            <h1 className="text-3xl font-bold tracking-tight">User Management</h1>
+            <p className="text-muted-foreground mt-2">
+              Create and manage Azure AD user accounts
             </p>
           </div>
-          {isPromaster && (
-            <Button
-              onClick={() => setIsAddDialogOpen(true)}
-              className="bg-nintex-orange hover:bg-nintex-orange-hover"
-            >
-              <UserPlus className="mr-2 h-4 w-4" />
-              Add User
-            </Button>
-          )}
+
+          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <UserPlus className="mr-2 h-4 w-4" />
+                Create User
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Create New Local User</DialogTitle>
+                <DialogDescription>
+                  Create a new user account with email and password authentication
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="email">Email Address *</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    placeholder="user@example.com"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="displayName">Display Name *</Label>
+                  <Input
+                    id="displayName"
+                    value={formData.displayName}
+                    onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
+                    placeholder="John Doe"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="password">Password *</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      placeholder="Minimum 8 characters"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="confirmPassword">Confirm Password *</Label>
+                    <Input
+                      id="confirmPassword"
+                      type="password"
+                      value={formData.confirmPassword}
+                      onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                      placeholder="Re-enter password"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="role">Application Role</Label>
+                  <Select
+                    value={formData.role}
+                    onValueChange={(value: any) => setFormData({ ...formData, role: value })}
+                  >
+                    <SelectTrigger id="role">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="user">User (View Only)</SelectItem>
+                      <SelectItem value="business_analyst">Business Analyst (Can Edit)</SelectItem>
+                      <SelectItem value="promaster">Promaster (Full Admin)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="jobTitle">Job Title (Optional)</Label>
+                    <Input
+                      id="jobTitle"
+                      value={formData.jobTitle || ''}
+                      onChange={(e) => setFormData({ ...formData, jobTitle: e.target.value })}
+                      placeholder="e.g., Business Analyst"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="department">Department (Optional)</Label>
+                    <Input
+                      id="department"
+                      value={formData.department || ''}
+                      onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                      placeholder="e.g., Finance"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="forceChangePassword"
+                    checked={formData.forceChangePassword}
+                    onCheckedChange={(checked) =>
+                      setFormData({ ...formData, forceChangePassword: checked })
+                    }
+                  />
+                  <Label htmlFor="forceChangePassword">
+                    Require password change on first sign-in
+                  </Label>
+                </div>
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleCreateUser} disabled={createUserMutation.isPending}>
+                  {createUserMutation.isPending ? 'Creating...' : 'Create User'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
+
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>About User Management</AlertTitle>
+          <AlertDescription>
+            Users created here will use email/password authentication stored in the database.
+            Organizational users with Azure AD can still sign in using their Microsoft account (SSO).
+            Both authentication methods provide access to the same application.
+          </AlertDescription>
+        </Alert>
 
         <Card>
           <CardHeader>
-            <CardTitle>Users</CardTitle>
+            <CardTitle>Application Users</CardTitle>
             <CardDescription>
-              View and manage user roles (User, Business Analyst, Promaster)
+              All users with access to the CPS230 application
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {loading ? (
-              <div className="flex h-[200px] items-center justify-center">
-                <p className="text-muted-foreground">Loading users...</p>
+            {isLoading && (
+              <div className="text-center py-8 text-muted-foreground">Loading users...</div>
+            )}
+
+            {error && (
+              <div className="text-center py-8 text-destructive">
+                Error loading users: {error.message}
               </div>
-            ) : users.length === 0 ? (
-              <div className="flex h-[200px] items-center justify-center border-2 border-dashed border-muted-foreground/25 rounded-lg bg-muted/10">
-                <p className="text-muted-foreground">No users found</p>
+            )}
+
+            {users && users.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground">
+                No users found. Create your first user to get started.
               </div>
-            ) : (
+            )}
+
+            {users && users.length > 0 && (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
+                    <TableHead>Display Name</TableHead>
                     <TableHead>Email</TableHead>
-                    <TableHead>Role</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead>Created</TableHead>
-                    {isPromaster && <TableHead className="text-right">Actions</TableHead>}
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {users.map((user) => (
                     <TableRow key={user.id}>
-                      <TableCell className="font-medium">
-                        {user.full_name || 'N/A'}
-                      </TableCell>
-                      <TableCell>{user.email}</TableCell>
-                      <TableCell>{getRoleLabel(user.role)}</TableCell>
+                      <TableCell className="font-medium">{user.displayName}</TableCell>
+                      <TableCell>{user.userPrincipalName}</TableCell>
                       <TableCell>
-                        {new Date(user.created_at).toLocaleDateString()}
+                        <Badge variant={user.accountEnabled ? 'default' : 'secondary'}>
+                          {user.accountEnabled ? 'Active' : 'Disabled'}
+                        </Badge>
                       </TableCell>
-                      {isPromaster && (
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openEditDialog(user)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openDeleteDialog(user)}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      )}
+                      <TableCell>
+                        {new Date(user.createdDateTime).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedUser(user);
+                              setResetPasswordDialogOpen(true);
+                            }}
+                          >
+                            <KeyRound className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => handleDeleteUser(user)}
+                            disabled={deleteUserMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -316,194 +455,83 @@ export default function Users() {
             )}
           </CardContent>
         </Card>
-      </div>
 
-      {/* Add User Dialog */}
-      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className="sm:max-w-[525px]">
-          <DialogHeader>
-            <DialogTitle>Add New User</DialogTitle>
-            <DialogDescription>
-              Create a new user account for your organization
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="add_email">
-                Email <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="add_email"
-                type="email"
-                value={addFormData.email}
-                onChange={(e) =>
-                  setAddFormData({ ...addFormData, email: e.target.value })
-                }
-                placeholder="user@example.com"
-              />
-            </div>
+        {/* Reset Password Dialog */}
+        <Dialog open={resetPasswordDialogOpen} onOpenChange={setResetPasswordDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reset Password</DialogTitle>
+              <DialogDescription>
+                Reset password for {selectedUser?.displayName}
+              </DialogDescription>
+            </DialogHeader>
 
-            <div className="space-y-2">
-              <Label htmlFor="add_password">
-                Password <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="add_password"
-                type="password"
-                value={addFormData.password}
-                onChange={(e) =>
-                  setAddFormData({ ...addFormData, password: e.target.value })
-                }
-                placeholder="Minimum 6 characters"
-              />
-              <p className="text-xs text-muted-foreground">
-                User can change this password after first login
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="add_full_name">Full Name</Label>
-              <Input
-                id="add_full_name"
-                value={addFormData.full_name}
-                onChange={(e) =>
-                  setAddFormData({ ...addFormData, full_name: e.target.value })
-                }
-                placeholder="John Doe"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="add_role">Role</Label>
-              <Select
-                value={addFormData.role}
-                onValueChange={(value) =>
-                  setAddFormData({ ...addFormData, role: value as UserRole })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">User</SelectItem>
-                  <SelectItem value="business_analyst">Business Analyst</SelectItem>
-                  <SelectItem value="promaster">Promaster</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setIsAddDialogOpen(false);
-                resetAddForm();
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleAddUser}
-              className="bg-nintex-orange hover:bg-nintex-orange-hover"
-            >
-              Create User
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit User Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
-            <DialogDescription>
-              Update user information and role
-            </DialogDescription>
-          </DialogHeader>
-          {selectedUser && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <p className="text-sm text-muted-foreground">{selectedUser.email}</p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit_full_name">Full Name</Label>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="newPassword">New Password</Label>
                 <Input
-                  id="edit_full_name"
-                  value={editFormData.full_name}
+                  id="newPassword"
+                  type="password"
+                  value={resetPasswordData.newPassword}
                   onChange={(e) =>
-                    setEditFormData({ ...editFormData, full_name: e.target.value })
+                    setResetPasswordData({ ...resetPasswordData, newPassword: e.target.value })
                   }
-                  placeholder="John Doe"
+                  placeholder="Minimum 8 characters"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit_role">Role</Label>
-                <Select
-                  value={editFormData.role}
-                  onValueChange={(value) =>
-                    setEditFormData({ ...editFormData, role: value as UserRole })
+
+              <div className="grid gap-2">
+                <Label htmlFor="confirmNewPassword">Confirm Password</Label>
+                <Input
+                  id="confirmNewPassword"
+                  type="password"
+                  value={resetPasswordData.confirmPassword}
+                  onChange={(e) =>
+                    setResetPasswordData({ ...resetPasswordData, confirmPassword: e.target.value })
                   }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="business_analyst">Business Analyst</SelectItem>
-                    <SelectItem value="promaster">Promaster</SelectItem>
-                  </SelectContent>
-                </Select>
+                  placeholder="Re-enter password"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="forceChangePasswordReset"
+                  checked={resetPasswordData.forceChangePassword}
+                  onCheckedChange={(checked) =>
+                    setResetPasswordData({ ...resetPasswordData, forceChangePassword: checked })
+                  }
+                />
+                <Label htmlFor="forceChangePasswordReset">
+                  Require password change on next sign-in
+                </Label>
               </div>
             </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleUpdateUser}
-              className="bg-nintex-orange hover:bg-nintex-orange-hover"
-            >
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* Delete User Dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete User</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this user? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedUser && (
-            <div className="py-4">
-              <p className="text-sm">
-                <strong>Name:</strong> {selectedUser.full_name || 'N/A'}
-              </p>
-              <p className="text-sm">
-                <strong>Email:</strong> {selectedUser.email}
-              </p>
-              <p className="text-sm">
-                <strong>Role:</strong> {getRoleLabel(selectedUser.role)}
-              </p>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleDeleteUser}>
-              Delete User
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setResetPasswordDialogOpen(false);
+                  setSelectedUser(null);
+                  setResetPasswordData({
+                    newPassword: '',
+                    confirmPassword: '',
+                    forceChangePassword: true,
+                  });
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleResetPassword}
+                disabled={resetPasswordMutation.isPending}
+              >
+                {resetPasswordMutation.isPending ? 'Resetting...' : 'Reset Password'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
     </AppLayout>
   );
 }

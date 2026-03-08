@@ -1,24 +1,60 @@
-import { useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AlertCircle } from 'lucide-react';
 
 export default function Login() {
-  const { signIn, user } = useAuth();
+  const { signInWithMicrosoft, signInWithEmail, profile } = useAuth();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   // If user is already authenticated, redirect to dashboard
   useEffect(() => {
-    if (user) {
-      window.location.href = '/dashboard';
+    if (profile) {
+      navigate('/dashboard');
     }
-  }, [user]);
+  }, [profile, navigate]);
 
-  const handleSignIn = async () => {
+  const handleMicrosoftSignIn = async () => {
     try {
-      await signIn();
+      setError(null);
+      setLoading(true);
+      await signInWithMicrosoft();
     } catch (error) {
-      console.error('Sign in error:', error);
+      console.error('Microsoft sign in error:', error);
+      setError(error instanceof Error ? error.message : 'Sign in failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEmailSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!email || !password) {
+      setError('Please enter both email and password');
+      return;
+    }
+
+    try {
+      setError(null);
+      setLoading(true);
+      await signInWithEmail(email, password);
+      // Navigation will happen automatically via useEffect when profile is set
+    } catch (error) {
+      console.error('Email sign in error:', error);
+      setError(error instanceof Error ? error.message : 'Sign in failed');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -49,33 +85,102 @@ export default function Login() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Login</CardTitle>
+            <CardTitle>Sign In</CardTitle>
             <CardDescription>
-              Sign in using Azure AD
+              Choose your authentication method
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="text-sm text-muted-foreground space-y-2">
-              <p>
-                This application uses Azure Active Directory for secure authentication.
-              </p>
-              <p>
-                Click the button below to be redirected to the Microsoft sign-in page.
-              </p>
-            </div>
+          <CardContent>
+            {error && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
 
-            <Button
-              onClick={handleSignIn}
-              className="w-full bg-nintex-orange hover:bg-nintex-orange-hover"
-            >
-              Sign In with Azure AD
-            </Button>
+            <Tabs defaultValue="email" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="email">Email</TabsTrigger>
+                <TabsTrigger value="microsoft">Microsoft SSO</TabsTrigger>
+              </TabsList>
 
-            <div className="mt-4 text-center text-sm">
-              <span className="text-muted-foreground">Don't have an account? </span>
-              <Link to="/signup" className="text-accent hover:underline font-medium">
-                Sign up
-              </Link>
+              <TabsContent value="email" className="space-y-4 mt-4">
+                <form onSubmit={handleEmailSignIn} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="you@example.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      disabled={loading}
+                      autoComplete="email"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="password">Password</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="Enter your password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      disabled={loading}
+                      autoComplete="current-password"
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    className="w-full bg-nintex-orange hover:bg-nintex-orange-hover"
+                    disabled={loading}
+                  >
+                    {loading ? 'Signing in...' : 'Sign In with Email'}
+                  </Button>
+                </form>
+
+                <div className="text-xs text-muted-foreground text-center">
+                  For local users created by administrators
+                </div>
+              </TabsContent>
+
+              <TabsContent value="microsoft" className="space-y-4 mt-4">
+                <div className="text-sm text-muted-foreground space-y-2">
+                  <p>
+                    Sign in using your organizational Microsoft account.
+                  </p>
+                  <p>
+                    You'll be redirected to the Microsoft sign-in page.
+                  </p>
+                </div>
+
+                <Button
+                  onClick={handleMicrosoftSignIn}
+                  className="w-full bg-nintex-navy hover:bg-nintex-navy/90"
+                  disabled={loading}
+                >
+                  <svg className="mr-2 h-5 w-5" viewBox="0 0 21 21" fill="currentColor">
+                    <rect x="1" y="1" width="9" height="9" fill="currentColor" />
+                    <rect x="1" y="11" width="9" height="9" fill="currentColor" />
+                    <rect x="11" y="1" width="9" height="9" fill="currentColor" />
+                    <rect x="11" y="11" width="9" height="9" fill="currentColor" />
+                  </svg>
+                  {loading ? 'Redirecting...' : 'Sign In with Microsoft'}
+                </Button>
+
+                <div className="text-xs text-muted-foreground text-center">
+                  For users with organizational Azure AD accounts
+                </div>
+              </TabsContent>
+            </Tabs>
+
+            <div className="mt-6 text-center text-sm">
+              <span className="text-muted-foreground">Need help? </span>
+              <span className="text-accent font-medium">
+                Contact your administrator
+              </span>
             </div>
           </CardContent>
         </Card>

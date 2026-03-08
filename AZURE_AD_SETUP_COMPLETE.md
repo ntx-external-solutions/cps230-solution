@@ -2,7 +2,11 @@
 
 ## Summary
 
-Azure AD authentication has been successfully configured for your CPS230 application. Since Azure AD B2C was deprecated (May 1, 2025), we configured standard Azure AD (Entra ID) instead.
+Azure AD authentication has been successfully configured for your CPS230 application. The application now supports **dual authentication**:
+- **Azure AD SSO** (Entra ID) for organizational users
+- **Local database authentication** with email/password for external users created by admins
+
+This approach provides flexibility while avoiding Azure AD licensing costs for local users.
 
 ## Configuration Completed
 
@@ -34,9 +38,10 @@ VITE_REDIRECT_URI=https://ambitious-meadow-01fb2d300.4.azurestaticapps.net
 
 ### Code Changes
 Updated `src/contexts/AuthContext.tsx`:
-- Changed from B2C configuration to standard Azure AD
+- Configured standard Azure AD SSO
 - Authority: `https://login.microsoftonline.com/{tenantId}`
 - Scopes: `openid`, `profile`, `email`, `User.Read`
+- Added local authentication support for email/password users
 
 ### Deployment
 - Frontend rebuilt with Azure AD configuration

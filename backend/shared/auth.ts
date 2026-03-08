@@ -2,6 +2,7 @@ import { HttpRequest, InvocationContext } from '@azure/functions';
 import jwt from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
 import { query } from './database';
+import { verifyLocalUserToken, LocalUserTokenPayload } from './jwt';
 
 // JWT verification client for Azure AD
 let jwksClientInstance: jwksClient.JwksClient | null = null;
@@ -70,10 +71,11 @@ export interface DecodedToken {
  */
 export interface UserProfile {
   id: string;
-  azureAdObjectId: string;
+  azureAdObjectId?: string;  // Optional for local users
   email: string;
   fullName?: string;
   role: 'user' | 'business_analyst' | 'promaster';
+  authType: 'azure_sso' | 'local';
 }
 
 /**
@@ -118,8 +120,9 @@ export async function verifyToken(token: string): Promise<DecodedToken> {
 
 /**
  * Extract and verify Bearer token from Authorization header
+ * Supports both Azure AD tokens and local JWT tokens
  * @param request HTTP request
- * @returns Decoded token
+ * @returns Decoded token (Azure AD) or throws for local users (use authenticateRequestUnified)
  */
 export async function authenticateRequest(request: HttpRequest): Promise<DecodedToken> {
   const authHeader = request.headers.get('Authorization');
@@ -144,8 +147,64 @@ export async function authenticateRequest(request: HttpRequest): Promise<Decoded
 }
 
 /**
+ * Unified authentication that supports both Azure AD and local JWT tokens
+ * @param request HTTP request
+ * @returns User profile
+ */
+export async function authenticateRequestUnified(request: HttpRequest): Promise<UserProfile> {
+  const authHeader = request.headers.get('Authorization');
+
+  if (!authHeader) {
+    throw new Error('Missing Authorization header');
+  }
+
+  const parts = authHeader.split(' ');
+
+  if (parts.length !== 2 || parts[0].toLowerCase() !== 'bearer') {
+    throw new Error('Invalid Authorization header format. Expected: Bearer <token>');
+  }
+
+  const token = parts[1];
+
+  // Try local JWT token first (faster)
+  try {
+    const localPayload = verifyLocalUserToken(token);
+
+    // Get user from database to ensure they still exist
+    const result = await query(
+      `SELECT id, email, full_name, role, auth_type
+       FROM user_profiles
+       WHERE id = $1 AND auth_type = 'local'`,
+      [localPayload.userId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('User not found');
+    }
+
+    const user = result.rows[0];
+
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.full_name,
+      role: user.role,
+      authType: 'local',
+    };
+  } catch (localError) {
+    // Not a local token, try Azure AD
+    try {
+      const azureToken = await verifyToken(token);
+      return await getUserProfile(azureToken);
+    } catch (azureError: any) {
+      throw new Error(`Authentication failed: Invalid token`);
+    }
+  }
+}
+
+/**
  * Get or create user profile from database
- * @param decodedToken Decoded Azure AD B2C token
+ * @param decodedToken Decoded Azure AD token
  * @returns User profile with role
  */
 export async function getUserProfile(decodedToken: DecodedToken): Promise<UserProfile> {
@@ -154,13 +213,21 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
   const fullName = decodedToken.name || `${decodedToken.given_name || ''} ${decodedToken.family_name || ''}`.trim();
 
   // Try to get existing user profile
-  const result = await query<UserProfile>(
-    'SELECT id, azure_ad_object_id as "azureAdObjectId", email, full_name as "fullName", role FROM user_profiles WHERE azure_ad_object_id = $1',
+  const result = await query(
+    'SELECT id, entra_id_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type FROM user_profiles WHERE entra_id_object_id = $1',
     [azureAdObjectId]
   );
 
   if (result.rows.length > 0) {
-    return result.rows[0];
+    const user = result.rows[0];
+    return {
+      id: user.id,
+      azureAdObjectId: user.azureAdObjectId,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      authType: 'azure_sso',
+    };
   }
 
   // Check if this is the first user in the system
@@ -170,17 +237,26 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
   // First user gets Promaster role, all others get 'user' role
   const role = userCount === 0 ? 'promaster' : 'user';
 
-  // Create new user profile if doesn't exist, or return existing one on conflict
-  const insertResult = await query<UserProfile>(
-    `INSERT INTO user_profiles (azure_ad_object_id, email, full_name, role)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (azure_ad_object_id)
-     DO UPDATE SET email = EXCLUDED.email, full_name = EXCLUDED.full_name
-     RETURNING id, azure_ad_object_id as "azureAdObjectId", email, full_name as "fullName", role`,
+  // Create new user profile if doesn't exist
+  const insertResult = await query(
+    `INSERT INTO user_profiles (entra_id_object_id, email, full_name, role, auth_type)
+     VALUES ($1, $2, $3, $4, 'azure_sso')
+     ON CONFLICT (email)
+     DO UPDATE SET entra_id_object_id = EXCLUDED.entra_id_object_id, full_name = EXCLUDED.full_name
+     RETURNING id, entra_id_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type`,
     [azureAdObjectId, email, fullName, role]
   );
 
-  return insertResult.rows[0];
+  const user = insertResult.rows[0];
+
+  return {
+    id: user.id,
+    azureAdObjectId: user.azureAdObjectId,
+    email: user.email,
+    fullName: user.fullName,
+    role: user.role,
+    authType: 'azure_sso',
+  };
 }
 
 /**

@@ -9,7 +9,6 @@ import { useSettings, useUpdateSetting, useSyncProcessManager, useSyncHistory, u
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, CheckCircle2, XCircle, Clock, Plus, Trash2, Edit2, Check, X as XIcon } from 'lucide-react';
-// Supabase import removed - now using Azure AD B2C
 
 interface Region {
   name: string;

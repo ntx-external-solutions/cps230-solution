@@ -266,6 +266,20 @@ export const azureApi = {
     method: 'POST',
     body: JSON.stringify(data),
   }),
+
+  // Generic API methods for custom endpoints
+  get: (endpoint: string) => apiCall<any>(endpoint),
+  post: (endpoint: string, data: any) => apiCall<any>(endpoint, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  patch: (endpoint: string, data: any) => apiCall<any>(endpoint, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  }),
+  delete: (endpoint: string) => apiCall<any>(endpoint, {
+    method: 'DELETE',
+  }),
 };
 
 export default azureApi;

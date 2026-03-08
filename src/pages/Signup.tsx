@@ -16,8 +16,8 @@ export default function Signup() {
 
   const handleSignUp = async () => {
     try {
-      // In Azure AD B2C, sign-up and sign-in are handled by the same flow
-      // The B2C policy allows users to choose to sign up or sign in
+      // With Azure AD SSO, sign-up redirects to Microsoft authentication
+      // First-time users will be registered automatically
       await signUp();
     } catch (error) {
       console.error('Sign up error:', error);

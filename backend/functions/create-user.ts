@@ -16,7 +16,7 @@ import { validateUserProfileInput, ValidationError } from '../shared/validation'
 /**
  * Create User HTTP trigger function
  * Special endpoint for creating or upserting user profiles
- * This is typically called after Azure AD B2C authentication
+ * This is typically called after Azure AD SSO authentication
  */
 export async function createUserFunction(
   request: HttpRequest,
@@ -57,22 +57,22 @@ export async function createUserFunction(
     const validatedData = validateUserProfileInput(body);
 
     // Check if this is a self-registration or admin creating a user
-    const isSelfRegistration = validatedData.azure_ad_object_id === userProfile.azureAdObjectId;
+    const isSelfRegistration = validatedData.entra_id_object_id === userProfile.azureAdObjectId;
     const isAdminCreatingUser = hasRole(userProfile.role, ['promaster']) && !isSelfRegistration;
 
     // Ensure required fields
-    if (!validatedData.azure_ad_object_id || !validatedData.email) {
+    if (!validatedData.entra_id_object_id || !validatedData.email) {
       return {
         status: 400,
         headers: corsHeaders,
-        jsonBody: { error: 'azure_ad_object_id and email are required' },
+        jsonBody: { error: 'entra_id_object_id and email are required' },
       };
     }
 
     // Check if user already exists
     const existingUser = await query(
-      'SELECT id, role FROM user_profiles WHERE azure_ad_object_id = $1',
-      [validatedData.azure_ad_object_id]
+      'SELECT id, role FROM user_profiles WHERE entra_id_object_id = $1',
+      [validatedData.entra_id_object_id]
     );
 
     if (existingUser.rows.length > 0) {
@@ -101,9 +101,9 @@ export async function createUserFunction(
       }
 
       updates.push(`updated_at = NOW()`);
-      params.push(validatedData.azure_ad_object_id);
+      params.push(validatedData.entra_id_object_id);
 
-      const queryStr = `UPDATE user_profiles SET ${updates.join(', ')} WHERE azure_ad_object_id = $${paramIndex} RETURNING id, azure_ad_object_id, email, full_name, role, created_at, updated_at`;
+      const queryStr = `UPDATE user_profiles SET ${updates.join(', ')} WHERE entra_id_object_id = $${paramIndex} RETURNING id, entra_id_object_id, email, full_name, role, created_at, updated_at`;
 
       const result = await query(queryStr, params);
 
@@ -125,11 +125,11 @@ export async function createUserFunction(
 
       const result = await query(
         `INSERT INTO user_profiles (
-          azure_ad_object_id, email, full_name, role
+          entra_id_object_id, email, full_name, role
         ) VALUES ($1, $2, $3, $4)
-        RETURNING id, azure_ad_object_id, email, full_name, role, created_at, updated_at`,
+        RETURNING id, entra_id_object_id, email, full_name, role, created_at, updated_at`,
         [
-          validatedData.azure_ad_object_id,
+          validatedData.entra_id_object_id,
           validatedData.email,
           validatedData.full_name || null,
           role,

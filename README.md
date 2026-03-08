@@ -15,7 +15,7 @@ A production-ready solution for managing critical operations processes in alignm
 - **Frontend**: Azure Static Web Apps (React + TypeScript + Vite)
 - **Backend**: Azure Functions (Node.js 20)
 - **Database**: Azure Database for PostgreSQL Flexible Server
-- **Authentication**: Azure AD B2C
+- **Authentication**: Dual authentication (Azure AD SSO + Local Database)
 - **Secrets Management**: Azure Key Vault
 - **Monitoring**: Application Insights + Log Analytics
 
@@ -70,15 +70,21 @@ export POSTGRES_PASSWORD="<your-password>"
 ./database/init-database.sh
 ```
 
-#### 2. Configure Azure AD B2C
+#### 2. Configure Authentication
 
-1. Create an Azure AD B2C tenant (if you don't have one)
-2. Register a new application in Azure AD B2C
-3. Configure sign-up/sign-in user flow
-4. Add reply URLs for your Static Web App
-5. Update Function App environment variables with B2C details
+The application supports two authentication methods:
 
-See [docs/AZURE_AD_B2C_SETUP.md](docs/AZURE_AD_B2C_SETUP.md) for detailed instructions.
+**Azure AD SSO (for organizational users)**:
+1. Register an application in your Azure AD tenant
+2. Configure redirect URIs for your Static Web App
+3. Update Function App and Static Web App environment variables with Azure AD details
+
+**Local Database Users (for external users)**:
+1. Generate a secure JWT_SECRET for token signing
+2. Add JWT_SECRET to Function App environment variables
+3. Admin users can create local accounts via the Users management page
+
+See [DUAL_AUTH_SETUP_GUIDE.md](DUAL_AUTH_SETUP_GUIDE.md) for detailed instructions.
 
 #### 3. Deploy Backend Functions
 
@@ -130,16 +136,16 @@ WHERE email = 'admin@yourcompany.com';
 **Backend (Azure Functions)**:
 - `POSTGRESQL_CONNECTION_STRING`: PostgreSQL connection string (auto-configured)
 - `KEY_VAULT_URI`: Key Vault URI for secrets (auto-configured)
-- `AZURE_AD_B2C_TENANT_NAME`: Your B2C tenant name
-- `AZURE_AD_B2C_CLIENT_ID`: B2C application client ID
-- `AZURE_AD_B2C_POLICY_NAME`: B2C policy name (default: B2C_1_signupsignin)
+- `AZURE_AD_TENANT_ID`: Your Azure AD tenant ID (for SSO token validation)
+- `AZURE_AD_CLIENT_ID`: Azure AD application client ID
+- `JWT_SECRET`: Secure random string for local user token signing (min 32 chars)
 - `ALLOWED_ORIGINS`: Comma-separated list of allowed origins
 
 **Frontend (Static Web App)**:
 - `VITE_API_URL`: Azure Functions API URL (auto-configured)
-- `VITE_B2C_TENANT_NAME`: Your B2C tenant name
-- `VITE_B2C_CLIENT_ID`: B2C application client ID
-- `VITE_B2C_POLICY_NAME`: B2C policy name
+- `VITE_AZURE_TENANT_ID`: Your Azure AD tenant ID
+- `VITE_AZURE_CLIENT_ID`: Azure AD application client ID
+- `VITE_REDIRECT_URI`: Redirect URI for Azure AD authentication
 
 ## Development
 
@@ -189,7 +195,7 @@ cps230-solution/
 
 - [Deployment Guide](docs/DEPLOYMENT.md) - Detailed deployment instructions
 - [Configuration Reference](docs/CONFIGURATION.md) - Complete configuration guide
-- [Azure AD B2C Setup](docs/AZURE_AD_B2C_SETUP.md) - Authentication configuration
+- [Dual Authentication Setup](DUAL_AUTH_SETUP_GUIDE.md) - Authentication configuration
 - [Architecture Overview](docs/ARCHITECTURE.md) - System architecture details
 - [API Documentation](docs/API.md) - Backend API reference
 
@@ -236,7 +242,7 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for solutions to common d
 - All secrets stored in Azure Key Vault
 - HTTPS enforced for all communications
 - Row-level security enforced in database
-- Azure AD B2C for enterprise authentication
+- Dual authentication: Azure AD SSO for organizational users + bcrypt-hashed passwords with JWT tokens for local users
 - CORS configured with whitelisted origins
 
 ## Cost Optimization

@@ -169,25 +169,32 @@ az staticwebapp deploy \
 
 ## Post-Deployment Configuration
 
-### 1. Configure Azure AD B2C
+### 1. Configure Dual Authentication
 
-See [AZURE_AD_B2C_SETUP.md](AZURE_AD_B2C_SETUP.md) for detailed instructions.
+See [DUAL_AUTH_SETUP_GUIDE.md](../DUAL_AUTH_SETUP_GUIDE.md) for detailed instructions.
 
 Quick steps:
-1. Create Azure AD B2C tenant (if needed)
-2. Register application
-3. Create sign-up/sign-in user flow
-4. Configure reply URLs
-5. Update Function App settings:
+1. Register application in Azure AD (for SSO)
+2. Generate JWT secret for local users
+3. Run database migration for local auth support
+4. Update Function App settings:
 
 ```bash
+# Generate secure JWT secret
+JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+
+# Update Function App settings
 az functionapp config appsettings set \
   --name "$FUNCTION_APP_NAME" \
   --resource-group "$RESOURCE_GROUP" \
   --settings \
-    AZURE_AD_B2C_TENANT_NAME="your-tenant-name" \
-    AZURE_AD_B2C_CLIENT_ID="your-client-id" \
-    AZURE_AD_B2C_POLICY_NAME="B2C_1_signupsignin"
+    AZURE_AD_TENANT_ID="your-azure-tenant-id" \
+    AZURE_AD_CLIENT_ID="your-azure-client-id" \
+    JWT_SECRET="$JWT_SECRET"
+
+# Run database migration
+psql "host=$POSTGRES_HOST dbname=cps230 user=cps230admin sslmode=require" \
+  -f database/migrations/004_add_local_user_auth.sql
 ```
 
 ### 2. Configure CORS
@@ -318,7 +325,7 @@ git push origin main
 
 **Issue: Deployment fails with "insufficient permissions"**
 - Ensure you have Owner or Contributor role on the subscription
-- Check Azure AD permissions if creating B2C resources
+- Check Azure AD permissions if registering applications
 
 **Issue: Database connection fails**
 - Verify firewall rules allow Azure services
@@ -373,7 +380,8 @@ For deployment issues:
 
 ## Security Checklist
 
-- [ ] Azure AD B2C properly configured
+- [ ] Dual authentication properly configured (Azure AD + JWT)
+- [ ] JWT_SECRET is securely generated and stored
 - [ ] CORS allows only specific origins
 - [ ] Database firewall rules are restrictive
 - [ ] Secrets stored in Key Vault

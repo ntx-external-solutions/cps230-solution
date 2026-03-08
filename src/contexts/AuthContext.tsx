@@ -3,7 +3,6 @@ import {
   PublicClientApplication,
   AccountInfo,
   InteractionRequiredAuthError,
-  AuthenticationResult,
 } from '@azure/msal-browser';
 import { MsalProvider, useMsal, useIsAuthenticated } from '@azure/msal-react';
 import { azureApi, setAccessTokenProvider } from '@/lib/azureApi';
@@ -30,11 +29,17 @@ const loginRequest = {
 // Create MSAL instance
 export const msalInstance = new PublicClientApplication(msalConfig);
 
+// Local auth token storage keys
+const LOCAL_AUTH_TOKEN_KEY = 'cps230_local_auth_token';
+const LOCAL_USER_PROFILE_KEY = 'cps230_local_user_profile';
+
 interface AuthContextType {
   user: AccountInfo | null;
   profile: UserProfile | null;
   loading: boolean;
-  signIn: () => Promise<void>;
+  authType: 'azure_sso' | 'local' | null;
+  signInWithMicrosoft: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
   signUp: () => Promise<void>;
   signOut: () => Promise<void>;
   isPromaster: boolean;
@@ -50,11 +55,19 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useIsAuthenticated();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authType, setAuthType] = useState<'azure_sso' | 'local' | null>(null);
 
   const user = accounts.length > 0 ? accounts[0] : null;
 
-  // Get ID token for API calls (ID token is used for backend authentication)
+  // Get token (either Azure AD or local JWT)
   const getAccessToken = async (): Promise<string> => {
+    // Check for local auth first
+    const localToken = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
+    if (localToken && authType === 'local') {
+      return localToken;
+    }
+
+    // Fall back to Azure AD token
     if (!user) {
       throw new Error('No authenticated user');
     }
@@ -64,12 +77,9 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
         ...loginRequest,
         account: user,
       });
-      // Return ID token instead of access token for backend authentication
-      // ID token has our client ID as the audience, access token is for Microsoft Graph
       return response.idToken;
     } catch (error) {
       if (error instanceof InteractionRequiredAuthError) {
-        // Fallback to interactive method
         const response = await instance.acquireTokenPopup({
           ...loginRequest,
           account: user,
@@ -83,13 +93,61 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
   // Set up the access token provider for the API client
   useEffect(() => {
     setAccessTokenProvider(getAccessToken);
-  }, [user]);
+  }, [user, authType]);
 
-  // Fetch user profile when authenticated
+  // Check for existing local auth on mount
   useEffect(() => {
-    const fetchUserProfile = async () => {
+    const checkLocalAuth = async () => {
+      const localToken = localStorage.getItem(LOCAL_AUTH_TOKEN_KEY);
+      const localProfileStr = localStorage.getItem(LOCAL_USER_PROFILE_KEY);
+
+      if (localToken && localProfileStr) {
+        try {
+          const localProfile = JSON.parse(localProfileStr);
+
+          // Verify token is still valid by making a test request
+          const response = await fetch(`${import.meta.env.VITE_API_URL}/user-profiles/${localProfile.id}`, {
+            headers: {
+              'Authorization': `Bearer ${localToken}`,
+            },
+          });
+
+          if (response.ok) {
+            setProfile(localProfile);
+            setAuthType('local');
+            setLoading(false);
+            return;
+          } else {
+            // Token invalid, clear local auth
+            localStorage.removeItem(LOCAL_AUTH_TOKEN_KEY);
+            localStorage.removeItem(LOCAL_USER_PROFILE_KEY);
+          }
+        } catch (error) {
+          console.error('Error validating local auth:', error);
+          localStorage.removeItem(LOCAL_AUTH_TOKEN_KEY);
+          localStorage.removeItem(LOCAL_USER_PROFILE_KEY);
+        }
+      }
+
+      setLoading(false);
+    };
+
+    checkLocalAuth();
+  }, []);
+
+  // Fetch Azure AD user profile when authenticated via MSAL
+  useEffect(() => {
+    const fetchAzureUserProfile = async () => {
+      // Skip if already authenticated locally
+      if (authType === 'local') {
+        return;
+      }
+
       if (!isAuthenticated || !user) {
-        setProfile(null);
+        if (authType !== 'local') {
+          setProfile(null);
+          setAuthType(null);
+        }
         setLoading(false);
         return;
       }
@@ -97,7 +155,6 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
       try {
         setLoading(true);
 
-        // Get or create user profile
         const azureAdObjectId = user.localAccountId || user.homeAccountId;
         const email = user.username;
 
@@ -110,7 +167,6 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
 
         if (result.error) {
           console.error('Error creating/updating user profile:', result.error);
-          // Still set a basic profile from Azure AD data
           setProfile({
             id: azureAdObjectId,
             azure_ad_object_id: azureAdObjectId,
@@ -123,9 +179,10 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
         } else {
           setProfile(result.data);
         }
+
+        setAuthType('azure_sso');
       } catch (error) {
         console.error('Error fetching user profile:', error);
-        // Set basic profile from Azure AD
         if (user) {
           setProfile({
             id: user.localAccountId || user.homeAccountId,
@@ -136,47 +193,90 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           } as UserProfile);
+          setAuthType('azure_sso');
         }
       } finally {
         setLoading(false);
       }
     };
 
-    fetchUserProfile();
+    fetchAzureUserProfile();
   }, [isAuthenticated, user]);
 
-  const signIn = async () => {
+  // Sign in with Microsoft (Azure AD SSO)
+  const signInWithMicrosoft = async () => {
     try {
-      console.log('Starting login with request:', loginRequest);
-      console.log('Current MSAL accounts:', accounts);
+      console.log('Starting Microsoft login');
 
-      // Try popup first for better error visibility
       try {
         const response = await instance.loginPopup(loginRequest);
-        console.log('Login successful:', response);
+        console.log('Microsoft login successful:', response);
       } catch (popupError) {
         console.log('Popup failed, trying redirect:', popupError);
         await instance.loginRedirect(loginRequest);
       }
     } catch (error) {
-      console.error('Login failed:', error);
-      alert(`Login error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('Microsoft login failed:', error);
       throw error;
     }
   };
 
+  // Sign in with email/password (Local auth)
+  const signInWithEmail = async (email: string, password: string) => {
+    try {
+      setLoading(true);
+
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/local/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Login failed');
+      }
+
+      const data = await response.json();
+
+      // Store token and profile
+      localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, data.token);
+      localStorage.setItem(LOCAL_USER_PROFILE_KEY, JSON.stringify(data.user));
+
+      setProfile(data.user);
+      setAuthType('local');
+    } catch (error) {
+      console.error('Email login failed:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const signUp = async () => {
-    // Azure AD sign-up flow - users sign up through the sign-in page
-    await signIn();
+    // For now, redirect to Microsoft sign-in
+    // In the future, could add a local sign-up flow
+    await signInWithMicrosoft();
   };
 
   const signOut = async () => {
     try {
-      const logoutRequest = {
-        account: user,
-        postLogoutRedirectUri: window.location.origin,
-      };
-      await instance.logoutRedirect(logoutRequest);
+      if (authType === 'local') {
+        // Clear local auth
+        localStorage.removeItem(LOCAL_AUTH_TOKEN_KEY);
+        localStorage.removeItem(LOCAL_USER_PROFILE_KEY);
+        setProfile(null);
+        setAuthType(null);
+      } else {
+        // Azure AD logout
+        const logoutRequest = {
+          account: user,
+          postLogoutRedirectUri: window.location.origin,
+        };
+        await instance.logoutRedirect(logoutRequest);
+      }
     } catch (error) {
       console.error('Logout failed:', error);
       throw error;
@@ -190,7 +290,9 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
     user,
     profile,
     loading,
-    signIn,
+    authType,
+    signInWithMicrosoft,
+    signInWithEmail,
     signUp,
     signOut,
     isPromaster,

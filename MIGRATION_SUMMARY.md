@@ -1,5 +1,13 @@
 # CPS230 Solution - Migration Summary
 
+> **⚠️ NOTE**: This document describes the initial migration from Supabase to Azure and is now outdated.
+>
+> **Current authentication approach**: Dual authentication (Azure AD SSO + Local Database)
+> - See [DUAL_AUTH_SETUP_GUIDE.md](DUAL_AUTH_SETUP_GUIDE.md) for current authentication setup
+> - The project no longer uses Azure AD B2C (mentioned below)
+
+---
+
 ## Overview
 
 This document summarizes the migration from the POC version (Supabase + Vercel) to the production-ready Azure deployment.

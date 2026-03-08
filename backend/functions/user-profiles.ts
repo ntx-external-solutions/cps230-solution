@@ -107,7 +107,7 @@ async function handleGet(
 
     // Check permissions - users can only view their own profile unless they're promaster
     const result = await query(
-      'SELECT id, azure_ad_object_id, email, full_name, role, created_at, updated_at FROM user_profiles WHERE id = $1',
+      'SELECT id, entra_id_object_id, email, full_name, role, created_at, updated_at FROM user_profiles WHERE id = $1',
       [id]
     );
 
@@ -122,7 +122,7 @@ async function handleGet(
     const profile = result.rows[0];
 
     // Check if user can view this profile
-    if (profile.azure_ad_object_id !== userProfile.azureAdObjectId && !hasRole(userProfile.role, ['promaster'])) {
+    if (profile.entra_id_object_id !== userProfile.azureAdObjectId && !hasRole(userProfile.role, ['promaster'])) {
       return {
         status: 403,
         headers: corsHeaders,
@@ -147,7 +147,7 @@ async function handleGet(
 
     // Get all user profiles
     const result = await query(
-      'SELECT id, azure_ad_object_id, email, full_name, role, created_at, updated_at FROM user_profiles ORDER BY email ASC'
+      'SELECT id, entra_id_object_id, email, full_name, role, created_at, updated_at FROM user_profiles ORDER BY email ASC'
     );
 
     return {
@@ -180,21 +180,21 @@ async function handlePost(
   const validatedData = validateUserProfileInput(body);
 
   // Ensure required fields for creation
-  if (!validatedData.azure_ad_object_id || !validatedData.email) {
+  if (!validatedData.entra_id_object_id || !validatedData.email) {
     return {
       status: 400,
       headers: corsHeaders,
-      jsonBody: { error: 'azure_ad_object_id and email are required for user creation' },
+      jsonBody: { error: 'entra_id_object_id and email are required for user creation' },
     };
   }
 
   const result = await query(
     `INSERT INTO user_profiles (
-      azure_ad_object_id, email, full_name, role
+      entra_id_object_id, email, full_name, role
     ) VALUES ($1, $2, $3, $4)
-    RETURNING id, azure_ad_object_id, email, full_name, role, created_at, updated_at`,
+    RETURNING id, entra_id_object_id, email, full_name, role, created_at, updated_at`,
     [
-      validatedData.azure_ad_object_id,
+      validatedData.entra_id_object_id,
       validatedData.email,
       validatedData.full_name || null,
       validatedData.role || 'user',
@@ -253,7 +253,7 @@ async function handleUpdate(
       role = COALESCE($3, role),
       updated_at = NOW()
     WHERE id = $4
-    RETURNING id, azure_ad_object_id, email, full_name, role, created_at, updated_at`,
+    RETURNING id, entra_id_object_id, email, full_name, role, created_at, updated_at`,
     [
       validatedData.email,
       validatedData.full_name,
@@ -312,9 +312,9 @@ async function handleDelete(
   }
 
   // Prevent deletion of own profile
-  const profileToDelete = await query('SELECT azure_ad_object_id FROM user_profiles WHERE id = $1', [id]);
+  const profileToDelete = await query('SELECT entra_id_object_id FROM user_profiles WHERE id = $1', [id]);
 
-  if (profileToDelete.rows.length > 0 && profileToDelete.rows[0].azure_ad_object_id === userProfile.azureAdObjectId) {
+  if (profileToDelete.rows.length > 0 && profileToDelete.rows[0].entra_id_object_id === userProfile.azureAdObjectId) {
     return {
       status: 400,
       headers: corsHeaders,

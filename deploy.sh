@@ -213,12 +213,12 @@ Application URLs:
 - API Endpoint: https://${FUNCTION_APP_NAME}.azurewebsites.net/api
 
 Next Steps:
-1. Configure Azure AD B2C (see docs/AZURE_AD_B2C_SETUP.md)
-2. Update Function App settings with B2C details
-3. Deploy frontend application
-4. Access the application at: $STATIC_WEB_APP_URL
-5. Sign up with admin email: $ADMIN_EMAIL
-6. Promote user to Promaster role in database
+1. Configure Azure AD authentication (see DUAL_AUTH_SETUP_GUIDE.md)
+2. Update Function App settings with Azure AD details and JWT_SECRET
+3. Run database migration: database/migrations/004_add_local_user_auth.sql
+4. Deploy frontend application
+5. Access the application at: $STATIC_WEB_APP_URL
+6. Sign in with Azure AD or create local admin user via API
 
 For detailed instructions, see README.md
 EOF
@@ -233,10 +233,11 @@ echo
 echo "Application URL: $STATIC_WEB_APP_URL"
 echo
 echo "Next steps:"
-echo "1. Configure Azure AD B2C authentication (see docs/AZURE_AD_B2C_SETUP.md)"
-echo "2. Update environment variables in Function App"
-echo "3. Deploy the frontend application"
-echo "4. Create your first admin user"
+echo "1. Configure dual authentication (see DUAL_AUTH_SETUP_GUIDE.md)"
+echo "2. Update environment variables in Function App (Azure AD + JWT_SECRET)"
+echo "3. Run database migration for local auth support"
+echo "4. Deploy the frontend application"
+echo "5. Create your first admin user (Azure AD SSO or local database)"
 echo
 echo "For detailed instructions, see README.md and deployment-info.txt"
 echo
