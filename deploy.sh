@@ -220,17 +220,31 @@ cd ..
 # Configure Azure AD and Function App
 print_section "Configuring Azure AD App Registration"
 
-print_info "Updating Azure AD app registration with redirect URI: $STATIC_WEB_APP_URL"
-az ad app update \
-    --id "$AZURE_CLIENT_ID" \
-    --web-redirect-uris "$STATIC_WEB_APP_URL" \
-    --enable-id-token-issuance true
+print_info "Updating Azure AD app registration with SPA redirect URI: $STATIC_WEB_APP_URL"
 
-if [ $? -eq 0 ]; then
-    print_info "Azure AD app registration updated successfully"
+# Get existing SPA redirect URIs to preserve them
+EXISTING_URIS=$(az ad app show --id "$AZURE_CLIENT_ID" --query "spa.redirectUris" -o json 2>/dev/null || echo "[]")
+
+# Add the new URI if it doesn't exist
+if echo "$EXISTING_URIS" | grep -q "$STATIC_WEB_APP_URL"; then
+    print_info "Redirect URI already configured"
 else
-    print_error "Failed to update Azure AD app registration"
-    print_warning "You may need to manually update the redirect URI in the Azure Portal"
+    # Create updated list with new URI
+    UPDATED_URIS=$(echo "$EXISTING_URIS" | jq --arg uri "$STATIC_WEB_APP_URL" '. + [$uri] | unique')
+
+    # Update the app registration using Graph API
+    az rest --method PATCH \
+        --uri "https://graph.microsoft.com/v1.0/applications(appId='$AZURE_CLIENT_ID')" \
+        --headers "Content-Type=application/json" \
+        --body "{\"spa\": {\"redirectUris\": $UPDATED_URIS}}" \
+        2>/dev/null
+
+    if [ $? -eq 0 ]; then
+        print_info "Azure AD app registration updated successfully (SPA platform)"
+    else
+        print_error "Failed to update Azure AD app registration"
+        print_warning "You may need to manually add the redirect URI to the SPA platform in the Azure Portal"
+    fi
 fi
 
 print_section "Configuring Function App Settings"
