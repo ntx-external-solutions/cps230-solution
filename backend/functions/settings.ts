@@ -5,9 +5,8 @@ import {
   InvocationContext,
 } from '@azure/functions';
 import {
-  authenticateRequest,
+  authenticateRequestUnified,
   getCorsHeaders,
-  getUserProfile,
   hasRole,
 } from '../shared/auth';
 import { query, setSessionContext, getPool } from '../shared/database';
@@ -33,13 +32,12 @@ export async function settingsFunction(
   }
 
   try {
-    // Authenticate user
-    const decodedToken = await authenticateRequest(request);
-    const userProfile = await getUserProfile(decodedToken);
+    // Authenticate user (supports both Azure AD and local JWT)
+    const userProfile = await authenticateRequestUnified(request);
 
     // Set session context for RLS
     const pool = getPool();
-    await setSessionContext(pool, userProfile.azureAdObjectId, userProfile.role);
+    await setSessionContext(pool, userProfile.azureAdObjectId, userProfile.role, userProfile.accountId);
 
     const url = new URL(request.url);
     const id = url.searchParams.get('id');

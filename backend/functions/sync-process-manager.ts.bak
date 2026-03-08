@@ -36,7 +36,8 @@ export async function syncProcessManagerFunction(
 
   try {
     // Authenticate user
-    const userProfile = await authenticateRequestUnified(request);
+    const decodedToken = await authenticateRequest(request);
+    const userProfile = await getUserProfile(decodedToken);
 
     // Get a dedicated client from the pool for this request
     client = await getClient();
