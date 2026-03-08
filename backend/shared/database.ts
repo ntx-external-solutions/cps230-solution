@@ -83,16 +83,19 @@ export async function withTransaction<T>(
  * @param client Database client
  * @param azureAdObjectId User's Azure AD object ID (or user ID for local users)
  * @param role User's role
+ * @param accountId User's account ID
  */
 export async function setSessionContext(
   client: PoolClient | Pool,
   azureAdObjectId: string | undefined,
-  role: string
+  role: string,
+  accountId?: string
 ): Promise<void> {
   await client.query(
     `SELECT set_config('app.current_user_azure_id', $1, false),
-            set_config('app.current_user_role', $2, false)`,
-    [azureAdObjectId || '', role]
+            set_config('app.current_user_role', $2, false),
+            set_config('app.current_account_id', $3, false)`,
+    [azureAdObjectId || '', role, accountId || '']
   );
 }
 

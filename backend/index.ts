@@ -1,6 +1,7 @@
 // Azure Functions v4 entry point
 // This file imports all function modules to register them with the runtime
 
+import './functions/auth-local';
 import './functions/create-user';
 import './functions/user-profiles';
 import './functions/processes';

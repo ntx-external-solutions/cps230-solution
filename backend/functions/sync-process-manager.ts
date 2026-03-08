@@ -44,7 +44,7 @@ export async function syncProcessManagerFunction(
     client = await getClient();
 
     // Set session context for RLS on this specific client
-    await setSessionContext(client, userProfile.azureAdObjectId, userProfile.role);
+    await setSessionContext(client, userProfile.azureAdObjectId, userProfile.role, userProfile.accountId);
 
     // Only promasters can trigger sync
     if (!hasRole(userProfile.role, ['promaster'])) {

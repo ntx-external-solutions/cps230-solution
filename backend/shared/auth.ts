@@ -76,6 +76,7 @@ export interface UserProfile {
   fullName?: string;
   role: 'user' | 'business_analyst' | 'promaster';
   authType: 'azure_sso' | 'local';
+  accountId?: string;  // User's account ID for RLS
 }
 
 /**
@@ -172,7 +173,7 @@ export async function authenticateRequestUnified(request: HttpRequest): Promise<
 
     // Get user from database to ensure they still exist
     const result = await query(
-      `SELECT id, email, full_name, role, auth_type
+      `SELECT id, email, full_name, role, auth_type, account_id
        FROM user_profiles
        WHERE id = $1 AND auth_type = 'local'`,
       [localPayload.userId]
@@ -190,6 +191,7 @@ export async function authenticateRequestUnified(request: HttpRequest): Promise<
       fullName: user.full_name,
       role: user.role,
       authType: 'local',
+      accountId: user.account_id,
     };
   } catch (localError) {
     // Not a local token, try Azure AD
@@ -214,7 +216,7 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
 
   // Try to get existing user profile
   const result = await query(
-    'SELECT id, entra_id_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type FROM user_profiles WHERE entra_id_object_id = $1',
+    'SELECT id, entra_id_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type, account_id as "accountId" FROM user_profiles WHERE entra_id_object_id = $1',
     [azureAdObjectId]
   );
 
@@ -227,6 +229,7 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
       fullName: user.fullName,
       role: user.role,
       authType: 'azure_sso',
+      accountId: user.accountId,
     };
   }
 
@@ -243,7 +246,7 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
      VALUES ($1, $2, $3, $4, 'azure_sso')
      ON CONFLICT (email)
      DO UPDATE SET entra_id_object_id = EXCLUDED.entra_id_object_id, full_name = EXCLUDED.full_name
-     RETURNING id, entra_id_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type`,
+     RETURNING id, entra_id_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type, account_id as "accountId"`,
     [azureAdObjectId, email, fullName, role]
   );
 
@@ -256,6 +259,7 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
     fullName: user.fullName,
     role: user.role,
     authType: 'azure_sso',
+    accountId: user.accountId,
   };
 }
 
