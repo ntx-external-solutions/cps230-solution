@@ -12,6 +12,9 @@ param resourceGroupName string = 'rg-cps230-${environmentName}'
 ])
 param environmentName string = 'prod'
 
+@description('Enable cost-optimized configuration (reduces costs ~90% but removes HA and premium features)')
+param costOptimized bool = true
+
 @description('Primary location for all resources')
 param location string = 'australiaeast'
 
@@ -85,12 +88,13 @@ module postgresql 'modules/postgresql.bicep' = {
     administratorLogin: postgresAdminUsername
     administratorPassword: postgresAdminPassword
     postgresqlVersion: '16'
-    skuName: environmentName == 'prod' ? 'Standard_D2s_v3' : 'Standard_B2s'
-    skuTier: environmentName == 'prod' ? 'GeneralPurpose' : 'Burstable'
-    storageSizeGB: environmentName == 'prod' ? 128 : 32
-    backupRetentionDays: environmentName == 'prod' ? 14 : 7
-    geoRedundantBackup: environmentName == 'prod' ? 'Enabled' : 'Disabled'
-    highAvailability: environmentName == 'prod' ? true : false
+    // Cost-optimized: Burstable_B1ms (~$15/mo) vs Enterprise: Standard_D2s_v3 (~$350/mo with HA)
+    skuName: costOptimized ? 'Standard_B1ms' : (environmentName == 'prod' ? 'Standard_D2s_v3' : 'Standard_B2s')
+    skuTier: costOptimized ? 'Burstable' : (environmentName == 'prod' ? 'GeneralPurpose' : 'Burstable')
+    storageSizeGB: costOptimized ? 32 : (environmentName == 'prod' ? 128 : 32)
+    backupRetentionDays: costOptimized ? 7 : (environmentName == 'prod' ? 14 : 7)
+    geoRedundantBackup: costOptimized ? 'Disabled' : (environmentName == 'prod' ? 'Enabled' : 'Disabled')
+    highAvailability: costOptimized ? false : (environmentName == 'prod' ? true : false)
     tags: tags
     databaseName: 'cps230'
   }
@@ -112,7 +116,8 @@ module functionApp 'modules/functionapp.bicep' = {
     tags: tags
     runtime: 'node'
     runtimeVersion: '20'
-    skuName: environmentName == 'prod' ? 'EP1' : 'Y1'
+    // Cost-optimized: Y1 Consumption (~$0-10/mo) vs Enterprise: EP1 (~$150/mo)
+    skuName: costOptimized ? 'Y1' : (environmentName == 'prod' ? 'EP1' : 'Y1')
   }
   dependsOn: [
     postgresql
@@ -146,7 +151,8 @@ module staticWebApp 'modules/staticwebapp.bicep' = {
   params: {
     location: 'eastasia' // Static Web Apps not available in australiaeast, using eastasia (closest to Australia)
     staticWebAppName: staticWebAppName
-    skuName: environmentName == 'prod' ? 'Standard' : 'Free'
+    // Cost-optimized: Free ($0/mo) vs Enterprise: Standard (~$9/mo)
+    skuName: costOptimized ? 'Free' : (environmentName == 'prod' ? 'Standard' : 'Free')
     tags: tags
     repositoryUrl: githubRepositoryUrl
     repositoryBranch: githubRepositoryBranch

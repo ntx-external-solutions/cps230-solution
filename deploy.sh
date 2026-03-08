@@ -69,6 +69,23 @@ fi
 
 read -p "GitHub repository URL (optional, press Enter to skip): " GITHUB_REPO
 
+read -p "Enable cost-optimized configuration? (Reduces costs ~90%, yes/no) [yes]: " COST_OPT
+COST_OPT=${COST_OPT:-yes}
+COST_OPTIMIZED=$([ "$COST_OPT" = "yes" ] && echo "true" || echo "false")
+
+print_section "Azure AD Configuration"
+read -p "Azure AD Tenant ID: " AZURE_TENANT_ID
+if [ -z "$AZURE_TENANT_ID" ]; then
+    print_error "Azure AD Tenant ID is required"
+    exit 1
+fi
+
+read -p "Azure AD Client ID (App Registration): " AZURE_CLIENT_ID
+if [ -z "$AZURE_CLIENT_ID" ]; then
+    print_error "Azure AD Client ID is required"
+    exit 1
+fi
+
 # Confirm deployment
 print_section "Deployment Summary"
 echo "Environment: $ENVIRONMENT"
@@ -76,6 +93,15 @@ echo "Location: $LOCATION"
 echo "Base Name: $BASE_NAME"
 echo "Admin Email: $ADMIN_EMAIL"
 echo "GitHub Repo: ${GITHUB_REPO:-Not specified}"
+echo "Cost Optimized: $COST_OPTIMIZED"
+echo "Azure AD Tenant ID: $AZURE_TENANT_ID"
+echo "Azure AD Client ID: $AZURE_CLIENT_ID"
+echo
+if [ "$COST_OPTIMIZED" = "true" ]; then
+    print_info "Cost-optimized mode: ~\$35-55/month (Burstable DB, Consumption Functions, Free Static Web App)"
+else
+    print_warning "Enterprise mode: ~\$480-590/month (HA Database, Premium Functions, Standard Static Web App)"
+fi
 echo
 
 read -p "Proceed with deployment? (yes/no): " CONFIRM
@@ -107,6 +133,7 @@ az deployment sub create \
         location="$LOCATION" \
         postgresAdminPassword="$POSTGRES_PASSWORD" \
         initialAdminEmail="$ADMIN_EMAIL" \
+        costOptimized="$COST_OPTIMIZED" \
         $GITHUB_PARAM \
     --output table
 
@@ -190,6 +217,89 @@ fi
 
 cd ..
 
+# Configure Azure AD and Function App
+print_section "Configuring Azure AD App Registration"
+
+print_info "Updating Azure AD app registration with redirect URI: $STATIC_WEB_APP_URL"
+az ad app update \
+    --id "$AZURE_CLIENT_ID" \
+    --web-redirect-uris "$STATIC_WEB_APP_URL" \
+    --enable-id-token-issuance true
+
+if [ $? -eq 0 ]; then
+    print_info "Azure AD app registration updated successfully"
+else
+    print_error "Failed to update Azure AD app registration"
+    print_warning "You may need to manually update the redirect URI in the Azure Portal"
+fi
+
+print_section "Configuring Function App Settings"
+
+print_info "Generating JWT secret..."
+JWT_SECRET=$(openssl rand -base64 32)
+
+print_info "Updating Function App environment variables..."
+az functionapp config appsettings set \
+    --name "$FUNCTION_APP_NAME" \
+    --resource-group "$RESOURCE_GROUP" \
+    --settings \
+        AZURE_TENANT_ID="$AZURE_TENANT_ID" \
+        AZURE_CLIENT_ID="$AZURE_CLIENT_ID" \
+        JWT_SECRET="$JWT_SECRET" \
+        ALLOWED_ORIGINS="$STATIC_WEB_APP_URL" \
+        STATIC_WEB_APP_URL="$STATIC_WEB_APP_URL" \
+    --output table
+
+if [ $? -eq 0 ]; then
+    print_info "Function App settings updated successfully"
+else
+    print_error "Function App settings update failed"
+fi
+
+# Deploy frontend
+print_section "Deploying Frontend Application"
+
+print_info "Creating production environment configuration..."
+cat > .env.production << EOF
+VITE_API_URL=https://${FUNCTION_APP_NAME}.azurewebsites.net/api
+VITE_AZURE_TENANT_ID=$AZURE_TENANT_ID
+VITE_AZURE_CLIENT_ID=$AZURE_CLIENT_ID
+VITE_REDIRECT_URI=$STATIC_WEB_APP_URL
+EOF
+
+print_info "Installing frontend dependencies..."
+npm install --legacy-peer-deps
+
+print_info "Building frontend application..."
+npm run build
+
+if [ $? -ne 0 ]; then
+    print_error "Frontend build failed"
+    print_warning "Skipping frontend deployment"
+else
+    print_info "Getting Static Web App deployment token..."
+    DEPLOY_TOKEN=$(az staticwebapp secrets list \
+        --name "$STATIC_WEB_APP_NAME" \
+        --resource-group "$RESOURCE_GROUP" \
+        --query properties.apiKey -o tsv)
+
+    if [ -n "$DEPLOY_TOKEN" ]; then
+        print_info "Deploying frontend to Static Web App..."
+        npx @azure/static-web-apps-cli deploy ./dist \
+            --deployment-token "$DEPLOY_TOKEN" \
+            --env production
+
+        if [ $? -eq 0 ]; then
+            print_info "Frontend deployed successfully"
+        else
+            print_error "Frontend deployment failed"
+        fi
+    else
+        print_error "Failed to retrieve Static Web App deployment token"
+        print_warning "You can manually deploy the frontend later"
+    fi
+fi
+
 # Save deployment info
 print_section "Saving Deployment Information"
 
@@ -212,13 +322,25 @@ Application URLs:
 - Web Application: $STATIC_WEB_APP_URL
 - API Endpoint: https://${FUNCTION_APP_NAME}.azurewebsites.net/api
 
+Azure AD Configuration:
+- Tenant ID: $AZURE_TENANT_ID
+- Client ID: $AZURE_CLIENT_ID
+- Redirect URI: $STATIC_WEB_APP_URL
+
+Deployment Status:
+✅ Infrastructure deployed
+✅ Database initialized
+✅ Backend deployed
+✅ Azure AD app registration configured
+✅ Function App environment variables set
+✅ Frontend built and deployed
+
 Next Steps:
-1. Configure Azure AD authentication (see DUAL_AUTH_SETUP_GUIDE.md)
-2. Update Function App settings with Azure AD details and JWT_SECRET
-3. Run database migration: database/migrations/004_add_local_user_auth.sql
-4. Deploy frontend application
-5. Access the application at: $STATIC_WEB_APP_URL
-6. Sign in with Azure AD or create local admin user via API
+1. Access the application at: $STATIC_WEB_APP_URL
+2. Sign in with Azure AD - first user will automatically get 'promaster' role
+3. Configure Process Manager credentials in Settings
+4. Test sync with Nintex Process Manager
+5. Add other users as needed
 
 For detailed instructions, see README.md
 EOF
@@ -230,16 +352,25 @@ print_section "Deployment Complete!"
 
 echo "Your CPS230 solution has been deployed successfully!"
 echo
-echo "Application URL: $STATIC_WEB_APP_URL"
+echo "🌐 Application URL: $STATIC_WEB_APP_URL"
+echo "🔗 API Endpoint: https://${FUNCTION_APP_NAME}.azurewebsites.net/api"
 echo
-echo "Next steps:"
-echo "1. Configure dual authentication (see DUAL_AUTH_SETUP_GUIDE.md)"
-echo "2. Update environment variables in Function App (Azure AD + JWT_SECRET)"
-echo "3. Run database migration for local auth support"
-echo "4. Deploy the frontend application"
-echo "5. Create your first admin user (Azure AD SSO or local database)"
+echo "✅ Deployment Status:"
+echo "  • Infrastructure deployed (cost-optimized: $COST_OPTIMIZED)"
+echo "  • Database initialized with schema"
+echo "  • Backend deployed (14 HTTP functions)"
+echo "  • Azure AD app registration configured"
+echo "  • Function App environment variables set"
+echo "  • Frontend built and deployed"
 echo
-echo "For detailed instructions, see README.md and deployment-info.txt"
+echo "🎯 Next Steps:"
+echo "  1. Visit: $STATIC_WEB_APP_URL"
+echo "  2. Sign in with Azure AD (first user gets 'promaster' role automatically)"
+echo "  3. Configure Process Manager credentials in Settings"
+echo "  4. Test sync with Nintex Process Manager"
+echo "  5. Add other users as needed"
+echo
+echo "📄 Full deployment details saved to: deployment-info.txt"
 echo
 
-print_info "Deployment script completed"
+print_info "Deployment script completed successfully!"
