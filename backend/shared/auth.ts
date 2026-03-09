@@ -92,6 +92,16 @@ export async function verifyToken(token: string): Promise<DecodedToken> {
     throw new Error('Azure AD configuration is incomplete');
   }
 
+  // Decode token without verification to see claims for debugging
+  const decoded = jwt.decode(token, { complete: true });
+  console.log('Token verification attempt:', {
+    expectedAudience: clientId,
+    expectedIssuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
+    actualAudience: (decoded?.payload as any)?.aud,
+    actualIssuer: (decoded?.payload as any)?.iss,
+    kid: decoded?.header?.kid,
+  });
+
   return new Promise((resolve, reject) => {
     jwt.verify(
       token,
@@ -100,6 +110,7 @@ export async function verifyToken(token: string): Promise<DecodedToken> {
           const key = await getSigningKey(header);
           callback(null, key);
         } catch (err) {
+          console.error('Error getting signing key:', err);
           callback(err as Error);
         }
       },
@@ -110,8 +121,10 @@ export async function verifyToken(token: string): Promise<DecodedToken> {
       },
       (err, decoded) => {
         if (err) {
+          console.error('JWT verification error:', err.message);
           reject(err);
         } else {
+          console.log('JWT verification successful');
           resolve(decoded as DecodedToken);
         }
       }
@@ -199,7 +212,8 @@ export async function authenticateRequestUnified(request: HttpRequest): Promise<
       const azureToken = await verifyToken(token);
       return await getUserProfile(azureToken);
     } catch (azureError: any) {
-      throw new Error(`Authentication failed: Invalid token`);
+      // Include the actual error message for debugging
+      throw new Error(`Authentication failed: ${azureError.message || azureError}`);
     }
   }
 }
@@ -216,7 +230,7 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
 
   // Try to get existing user profile
   const result = await query(
-    'SELECT id, entra_id_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type, account_id as "accountId" FROM user_profiles WHERE entra_id_object_id = $1',
+    'SELECT id, azure_ad_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type, account_id as "accountId" FROM user_profiles WHERE azure_ad_object_id = $1',
     [azureAdObjectId]
   );
 
@@ -242,11 +256,11 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
 
   // Create new user profile if doesn't exist
   const insertResult = await query(
-    `INSERT INTO user_profiles (entra_id_object_id, email, full_name, role, auth_type)
+    `INSERT INTO user_profiles (azure_ad_object_id, email, full_name, role, auth_type)
      VALUES ($1, $2, $3, $4, 'azure_sso')
      ON CONFLICT (email)
-     DO UPDATE SET entra_id_object_id = EXCLUDED.entra_id_object_id, full_name = EXCLUDED.full_name
-     RETURNING id, entra_id_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type, account_id as "accountId"`,
+     DO UPDATE SET azure_ad_object_id = EXCLUDED.azure_ad_object_id, full_name = EXCLUDED.full_name
+     RETURNING id, azure_ad_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type, account_id as "accountId"`,
     [azureAdObjectId, email, fullName, role]
   );
 

@@ -228,7 +228,7 @@ export function validateProcessControlInput(input: any): any {
  */
 export function validateUserProfileInput(input: any): any {
   const allowedFields = [
-    'entra_id_object_id',
+    'azure_ad_object_id',
     'email',
     'full_name',
     'role',

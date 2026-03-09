@@ -106,11 +106,11 @@ async function createAzureUser(
 
     const dbResult = await query(
       `INSERT INTO user_profiles (
-        entra_id_object_id, email, full_name, role
+        azure_ad_object_id, email, full_name, role
       ) VALUES ($1, $2, $3, $4)
-      ON CONFLICT (entra_id_object_id) DO UPDATE
+      ON CONFLICT (azure_ad_object_id) DO UPDATE
       SET email = EXCLUDED.email, full_name = EXCLUDED.full_name, updated_at = NOW()
-      RETURNING id, entra_id_object_id, email, full_name, role, created_at, updated_at`,
+      RETURNING id, azure_ad_object_id, email, full_name, role, created_at, updated_at`,
       [
         createdUser.id,
         createdUser.userPrincipalName,
@@ -274,7 +274,7 @@ async function deleteAzureUser(
     await setSessionContext(pool, userProfile.azureAdObjectId, userProfile.role, userProfile.accountId);
 
     await query(
-      'DELETE FROM user_profiles WHERE entra_id_object_id = $1',
+      'DELETE FROM user_profiles WHERE azure_ad_object_id = $1',
       [userId]
     );
 

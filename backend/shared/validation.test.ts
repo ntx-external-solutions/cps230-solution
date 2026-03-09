@@ -181,7 +181,7 @@ describe('Validation Utilities', () => {
   describe('validateUserProfileInput', () => {
     it('should validate and sanitize valid user profile input', () => {
       const input = {
-        entra_id_object_id: 'user-123',
+        azure_ad_object_id: 'user-123',
         email: 'user@example.com',
         full_name: 'Test User',
         role: 'business_analyst',
@@ -189,7 +189,7 @@ describe('Validation Utilities', () => {
       };
 
       const result = validateUserProfileInput(input);
-      expect(result.entra_id_object_id).toBe('user-123');
+      expect(result.azure_ad_object_id).toBe('user-123');
       expect(result.email).toBe('user@example.com');
       expect(result.full_name).toBe('Test User');
       expect(result.role).toBe('business_analyst');
