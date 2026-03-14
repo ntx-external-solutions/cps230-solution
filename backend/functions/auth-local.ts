@@ -134,9 +134,34 @@ export async function createLocalUser(
   }
 
   try {
-    // For now, skip authentication check to allow first user creation
-    // In production, this should check for admin role
     const body = await request.json() as any;
+
+    // Check if this is the first user (allow unauthenticated creation)
+    const userCountResult = await query('SELECT COUNT(*) as count FROM user_profiles');
+    const userCount = parseInt(userCountResult.rows[0].count);
+
+    // If users exist, require promaster authentication
+    if (userCount > 0) {
+      const { authenticateRequestUnified, hasRole } = await import('../shared/auth');
+
+      try {
+        const userProfile = await authenticateRequestUnified(request);
+
+        if (!hasRole(userProfile.role, ['promaster'])) {
+          return {
+            status: 403,
+            headers: corsHeaders,
+            jsonBody: { error: 'Only Promasters can create users' },
+          };
+        }
+      } catch (authError: any) {
+        return {
+          status: 401,
+          headers: corsHeaders,
+          jsonBody: { error: 'Authentication required to create users', details: authError.message },
+        };
+      }
+    }
 
     // Validate required fields
     if (!body.email || !body.password) {
@@ -250,6 +275,27 @@ export async function resetLocalUserPassword(
   }
 
   try {
+    // SECURITY: Only promasters can reset passwords
+    const { authenticateRequestUnified, hasRole } = await import('../shared/auth');
+
+    try {
+      const userProfile = await authenticateRequestUnified(request);
+
+      if (!hasRole(userProfile.role, ['promaster'])) {
+        return {
+          status: 403,
+          headers: corsHeaders,
+          jsonBody: { error: 'Only Promasters can reset passwords' },
+        };
+      }
+    } catch (authError: any) {
+      return {
+        status: 401,
+        headers: corsHeaders,
+        jsonBody: { error: 'Authentication required to reset passwords', details: authError.message },
+      };
+    }
+
     const userId = request.params.userId;
     const body = await request.json() as any;
 

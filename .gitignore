@@ -4,10 +4,23 @@ node_modules/
 # Build output
 dist/
 
-# Environment variables
+# Environment variables - NEVER commit these!
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+
+# Deployment outputs - contain secrets
+deployment-output.json
+deployment-info.txt
+app-registration.json
+*.zip
+
+# Temporary and backup files
+*.bak
+*.tmp
+*.swp
+*.swo
+*~
 
 # Logs
 logs/
@@ -23,9 +36,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 
 # Testing
 coverage/
@@ -33,3 +43,11 @@ coverage/
 # Misc
 .cache/
 .temp/
+
+# Documentation that contains deployment-specific info
+*_SUMMARY.md
+*_STATUS.md
+*_COMPLETE.md
+*_TRACKING.md
+DEPLOYMENT_INFO.txt
+PROJECT_STATUS.md

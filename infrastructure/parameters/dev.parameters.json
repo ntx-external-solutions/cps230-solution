@@ -15,10 +15,10 @@
       "value": "cps230admin"
     },
     "postgresAdminPassword": {
-      "value": "P@ssw0rd123!SecurePassword"
+      "value": "YourSecurePassword123!"
     },
     "initialAdminEmail": {
-      "value": "jonathan@palouse.io"
+      "value": "admin@example.com"
     },
     "githubRepositoryUrl": {
       "value": ""

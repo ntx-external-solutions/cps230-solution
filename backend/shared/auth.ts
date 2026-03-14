@@ -293,9 +293,20 @@ export function getCorsHeaders(origin?: string | null): Record<string, string> {
     allowedOrigins.push('http://localhost:5173', 'http://localhost:8080');
   }
 
+  // SECURITY: Only allow known origins, never use wildcard
+  // If origin is not in allowedOrigins, use first allowed origin as fallback (or reject)
   const allowedOrigin = origin && allowedOrigins.includes(origin)
     ? origin
-    : (allowedOrigins[0] || '*');
+    : (allowedOrigins[0] || null);
+
+  // If no allowed origin is configured, reject CORS
+  if (!allowedOrigin) {
+    return {
+      'Access-Control-Allow-Origin': 'null',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    };
+  }
 
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
