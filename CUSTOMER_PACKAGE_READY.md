@@ -269,10 +269,40 @@ For issues or questions:
 
 ---
 
-**Package Version**: 1.0.2
+**Package Version**: 1.1.0
 **Last Updated**: 2026-03-14
 **Test Deployment**: Successful
 **Status**: ✅ Ready for Customer Distribution
+
+---
+
+## Version 1.1.0 Updates (Latest)
+
+### Unified User Authentication
+✅ **Single Account Per User**: Email-based account linking prevents duplicates
+- Local users can login via SSO and accounts automatically merge
+- SSO users prevented from creating duplicate local accounts
+- Users keep both authentication methods after linking
+- See `docs/UNIFIED_USER_AUTHENTICATION.md` for complete documentation
+
+### User Management Improvements
+✅ **Fixed Users Page Display Issues**:
+- Display Name and Email now show correctly
+- Created date displays properly (was "Invalid Date")
+- Role badge replaces status (Promaster/Business Analyst/User)
+- Auth Type column shows available authentication methods (SSO/Password badges)
+
+✅ **New Admin Capabilities**:
+- Promasters can edit user Display Names
+- Promasters can edit user Email addresses
+- New Edit button (pencil icon) for each user
+- Edit User dialog with validation
+
+### Technical Improvements
+- Backend auto-links Azure AD to existing local users on first SSO login
+- Backend prevents duplicate user creation with helpful error messages
+- Frontend properly maps database fields (full_name, email, created_at)
+- Shows which auth methods each user has available
 
 ---
 
