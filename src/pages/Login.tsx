@@ -49,7 +49,10 @@ export default function Login() {
       setError(null);
       setLoading(true);
       await signInWithEmail(email, password);
-      // Navigation will happen automatically via useEffect when profile is set
+
+      // Explicitly navigate after successful login
+      console.log('Login successful, navigating to dashboard');
+      navigate('/dashboard');
     } catch (error) {
       console.error('Email sign in error:', error);
       setError(error instanceof Error ? error.message : 'Sign in failed');

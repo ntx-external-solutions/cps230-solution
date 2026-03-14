@@ -27,7 +27,8 @@ export function ProtectedRoute({ children, requiredRole, requiresEditor = false 
     );
   }
 
-  if (!user) {
+  // Check for either Azure AD user OR local auth profile
+  if (!user && !profile) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
