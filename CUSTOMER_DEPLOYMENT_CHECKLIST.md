@@ -200,3 +200,43 @@ The deployment creates:
 ---
 **Last Updated:** 2026-03-14
 **Version:** 1.0.0
+
+## Known Issues & Solutions
+
+### PostgreSQL Password Special Characters
+
+**Issue**: If the PostgreSQL password contains special characters (like `?`, `&`, `@`, `#`), they must be URL-encoded in connection strings.
+
+**Solution**: The deployment script automatically handles this as of version 1.0.1. If deploying manually:
+
+```bash
+# Example: Password "Pass?word@123" becomes:
+# Pass%3Fword%40123
+
+# URL encoding reference:
+# ?  -> %3F
+# @  -> %40
+# #  -> %23
+# &  -> %26
+# =  -> %3D
+# %  -> %25
+# +  -> %2B
+# space -> %20
+```
+
+**Deployment Script Fix** (already applied):
+The `deploy.sh` script now includes a `url_encode()` function that automatically encodes the password when constructing the PostgreSQL connection string.
+
+**Manual Fix** (if needed):
+```bash
+# If you need to manually update the connection string:
+az functionapp config appsettings set \
+  --name <function-app-name> \
+  --resource-group <resource-group> \
+  --settings \
+    POSTGRESQL_CONNECTION_STRING="postgresql://username:URL_ENCODED_PASSWORD@host:5432/database?sslmode=require"
+```
+
+---
+**Last Updated:** 2026-03-14
+**Version:** 1.0.1

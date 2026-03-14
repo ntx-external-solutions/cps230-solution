@@ -1,17 +1,19 @@
 import jwt from 'jsonwebtoken';
 
 // JWT secret from environment variable (generate a secure random string for production)
-const JWT_SECRET = process.env.JWT_SECRET;
+const jwtSecretFromEnv = process.env.JWT_SECRET;
 
 // Validate JWT_SECRET is set and meets minimum security requirements
-if (!JWT_SECRET) {
+if (!jwtSecretFromEnv) {
   throw new Error('CRITICAL: JWT_SECRET environment variable must be set');
 }
 
-if (JWT_SECRET.length < 32) {
+if (jwtSecretFromEnv.length < 32) {
   throw new Error('CRITICAL: JWT_SECRET must be at least 32 characters long for security');
 }
 
+// Now TypeScript knows this is definitely a string
+const JWT_SECRET: string = jwtSecretFromEnv;
 const JWT_EXPIRATION = '24h'; // Token expires in 24 hours
 
 export interface LocalUserTokenPayload {

@@ -253,8 +253,29 @@ JWT_SECRET=$(openssl rand -base64 32)
 
 print_info "Updating Function App environment variables..."
 
+# URL-encode the PostgreSQL password to handle special characters
+# This prevents issues with characters like ?, &, @, etc.
+url_encode() {
+    local string="${1}"
+    local strlen=${#string}
+    local encoded=""
+    local pos c o
+
+    for (( pos=0 ; pos<strlen ; pos++ )); do
+        c=${string:$pos:1}
+        case "$c" in
+            [-_.~a-zA-Z0-9] ) o="${c}" ;;
+            * ) printf -v o '%%%02x' "'$c"
+        esac
+        encoded+="${o}"
+    done
+    echo "${encoded}"
+}
+
+POSTGRES_PASSWORD_ENCODED=$(url_encode "$POSTGRES_PASSWORD")
+
 # Construct PostgreSQL connection string in correct format for Node.js pg library
-POSTGRES_CONN_STRING="postgresql://cps230admin:${POSTGRES_PASSWORD}@${POSTGRES_FQDN}:5432/${POSTGRES_DB}?sslmode=require"
+POSTGRES_CONN_STRING="postgresql://cps230admin:${POSTGRES_PASSWORD_ENCODED}@${POSTGRES_FQDN}:5432/${POSTGRES_DB}?sslmode=require"
 
 az functionapp config appsettings set \
     --name "$FUNCTION_APP_NAME" \
