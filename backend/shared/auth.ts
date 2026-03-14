@@ -186,7 +186,7 @@ export async function authenticateRequestUnified(request: HttpRequest): Promise<
 
     // Get user from database to ensure they still exist
     const result = await query(
-      `SELECT id, email, full_name, role, auth_type, account_id
+      `SELECT id, email, full_name, role, auth_type
        FROM user_profiles
        WHERE id = $1 AND auth_type = 'local'`,
       [localPayload.userId]
@@ -204,16 +204,24 @@ export async function authenticateRequestUnified(request: HttpRequest): Promise<
       fullName: user.full_name,
       role: user.role,
       authType: 'local',
-      accountId: user.account_id,
+      accountId: undefined,  // Local users don't have account_id
     };
   } catch (localError) {
-    // Not a local token, try Azure AD
-    try {
-      const azureToken = await verifyToken(token);
-      return await getUserProfile(azureToken);
-    } catch (azureError: any) {
-      // Include the actual error message for debugging
-      throw new Error(`Authentication failed: ${azureError.message || azureError}`);
+    // Not a local token, try Azure AD (only if configured)
+    const clientId = process.env.AZURE_CLIENT_ID;
+    const tenantId = process.env.AZURE_TENANT_ID;
+
+    if (clientId && tenantId) {
+      try {
+        const azureToken = await verifyToken(token);
+        return await getUserProfile(azureToken);
+      } catch (azureError: any) {
+        // Include the actual error message for debugging
+        throw new Error(`Authentication failed: ${azureError.message || azureError}`);
+      }
+    } else {
+      // Azure AD not configured, throw the local error
+      throw new Error(`Local authentication failed: ${localError instanceof Error ? localError.message : localError}`);
     }
   }
 }

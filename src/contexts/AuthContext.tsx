@@ -106,7 +106,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
           const localProfile = JSON.parse(localProfileStr);
 
           // Verify token is still valid by making a test request
-          const response = await fetch(`${import.meta.env.VITE_API_URL}/user-profiles/${localProfile.id}`, {
+          const response = await fetch(`${import.meta.env.VITE_API_URL}/user-profiles?id=${localProfile.id}`, {
             headers: {
               'Authorization': `Bearer ${localToken}`,
             },
