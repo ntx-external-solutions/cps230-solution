@@ -200,6 +200,20 @@ if command -v psql &> /dev/null; then
     ./database/init-database.sh
     if [ $? -eq 0 ]; then
         print_info "Database initialized successfully"
+
+        # Create initial admin user
+        print_info "Creating initial admin user..."
+        export ADMIN_EMAIL="$ADMIN_EMAIL"
+        export ADMIN_PASSWORD="$POSTGRES_PASSWORD"
+        export ADMIN_FULL_NAME="System Administrator"
+
+        ./database/create-initial-admin.sh
+        if [ $? -eq 0 ]; then
+            print_info "Initial admin user created successfully"
+        else
+            print_warning "Failed to create initial admin user"
+            print_info "You can manually create an admin user later"
+        fi
     else
         print_error "Database initialization failed"
         print_warning "You can manually initialize the database later using: ./database/init-database.sh"
@@ -210,6 +224,7 @@ else
 fi
 
 unset POSTGRES_PASSWORD
+unset ADMIN_PASSWORD
 
 # Configure Azure AD App Registration (if configured)
 if [ -n "$AZURE_CLIENT_ID" ]; then
@@ -423,10 +438,18 @@ fi
 
 cat >> deployment-info.txt << EOF
 
+Initial Admin Credentials:
+- Email:    $ADMIN_EMAIL
+- Password: (same as PostgreSQL admin password)
+- Role:     promaster (full admin access)
+
+⚠️  IMPORTANT: Change the admin password after first login!
+
 Deployment Status:
 ✅ Infrastructure deployed
 ✅ Database initialized
 ✅ Backend deployed
+✅ Initial admin user created
 EOF
 
 if [ -n "$AZURE_TENANT_ID" ]; then
@@ -454,9 +477,11 @@ cat >> deployment-info.txt << EOF
 EOF
 else
 cat >> deployment-info.txt << EOF
-2. Create your first user account at the login page
-   - First user will automatically get 'promaster' (admin) role
-   - Use email and password for authentication
+2. Log in with the initial admin credentials:
+   - Email: $ADMIN_EMAIL
+   - Password: (same as PostgreSQL password)
+   - Role: promaster (full admin access)
+   ⚠️  Change this password after first login!
 3. (Optional) Configure Azure AD SSO later via Function App settings:
    - Add AZURE_TENANT_ID and AZURE_CLIENT_ID to Function App
    - Add VITE_AZURE_TENANT_ID, VITE_AZURE_CLIENT_ID to Static Web App
@@ -465,9 +490,9 @@ EOF
 fi
 
 cat >> deployment-info.txt << EOF
-3. Configure Process Manager credentials in Settings
-4. Test sync with Nintex Process Manager
-5. Add other users as needed
+4. Configure Process Manager credentials in Settings
+5. Test sync with Nintex Process Manager
+6. Add other users as needed
 
 For detailed instructions, see README.md
 EOF
@@ -486,6 +511,7 @@ echo "✅ Deployment Status:"
 echo "  • Infrastructure deployed (cost-optimized: $COST_OPTIMIZED)"
 echo "  • Database initialized with schema"
 echo "  • Backend deployed (14 HTTP functions)"
+echo "  • Initial admin user created"
 if [ -n "$AZURE_TENANT_ID" ]; then
     echo "  • Azure AD SSO configured"
 else
@@ -494,14 +520,18 @@ fi
 echo "  • Function App environment variables set"
 echo "  • Frontend built and deployed"
 echo
+echo "🔑 Initial Admin Credentials:"
+echo "  • Email:    $ADMIN_EMAIL"
+echo "  • Password: (same as PostgreSQL password)"
+echo "  • Role:     promaster (full admin access)"
+echo "  ⚠️  IMPORTANT: Change this password after first login!"
+echo
 echo "🎯 Next Steps:"
 echo "  1. Visit: $STATIC_WEB_APP_URL"
 if [ -n "$AZURE_TENANT_ID" ]; then
-    echo "  2. Sign in with Azure AD OR create a local account"
-    echo "     (First user gets 'promaster' role automatically)"
+    echo "  2. Sign in with Azure AD OR use the local admin account above"
 else
-    echo "  2. Create your first user account (gets 'promaster' role automatically)"
-    echo "     Use email and password for authentication"
+    echo "  2. Log in with the admin credentials shown above"
 fi
 echo "  3. Configure Process Manager credentials in Settings"
 echo "  4. Test sync with Nintex Process Manager"

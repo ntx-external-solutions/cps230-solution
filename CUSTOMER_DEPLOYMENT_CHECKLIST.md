@@ -240,3 +240,49 @@ az functionapp config appsettings set \
 ---
 **Last Updated:** 2026-03-14
 **Version:** 1.0.1
+
+## Initial Admin User
+
+### Automatic Creation During Deployment
+
+As of version 1.0.2, the deployment script automatically creates an initial admin user:
+
+**Credentials:**
+- Email: Same as `initialAdminEmail` parameter (or value provided during deployment)
+- Password: Same as PostgreSQL admin password
+- Role: `promaster` (full admin access)
+
+**Important:**
+- This user is created ONLY if no users exist in the database
+- The password is the same as the PostgreSQL password for convenience
+- ⚠️  **Change this password immediately after first login!**
+
+### Manual Creation (if needed)
+
+If the automatic creation fails or you need to create another admin user:
+
+```bash
+# Set environment variables
+export POSTGRES_HOST="your-postgres-server.postgres.database.azure.com"
+export POSTGRES_DB="cps230"
+export POSTGRES_USER="cps230admin"
+export POSTGRES_PASSWORD="your-postgres-password"
+export ADMIN_EMAIL="admin@example.com"
+export ADMIN_PASSWORD="YourSecurePassword123!"
+export ADMIN_FULL_NAME="System Administrator"
+
+# Run the script
+./database/create-initial-admin.sh
+```
+
+### User Management After Deployment
+
+Once logged in as admin, you can:
+1. Create additional users via the Users page
+2. Assign roles: `user`, `business_analyst`, `promaster`
+3. Update your own password in Settings
+4. Manage other user accounts
+
+---
+**Last Updated:** 2026-03-14
+**Version:** 1.0.2
