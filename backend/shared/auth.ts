@@ -236,14 +236,14 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
   const email = decodedToken.email || decodedToken.emails?.[0] || '';
   const fullName = decodedToken.name || `${decodedToken.given_name || ''} ${decodedToken.family_name || ''}`.trim();
 
-  // Try to get existing user profile
-  const result = await query(
+  // Try to get existing user profile by Azure AD Object ID
+  const azureAdResult = await query(
     'SELECT id, azure_ad_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type, account_id as "accountId" FROM user_profiles WHERE azure_ad_object_id = $1',
     [azureAdObjectId]
   );
 
-  if (result.rows.length > 0) {
-    const user = result.rows[0];
+  if (azureAdResult.rows.length > 0) {
+    const user = azureAdResult.rows[0];
     return {
       id: user.id,
       azureAdObjectId: user.azureAdObjectId,
@@ -255,6 +255,45 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
     };
   }
 
+  // Check if a local user with this email already exists
+  const emailResult = await query(
+    'SELECT id, azure_ad_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type, password_hash, account_id as "accountId" FROM user_profiles WHERE email = $1',
+    [email]
+  );
+
+  if (emailResult.rows.length > 0) {
+    const existingUser = emailResult.rows[0];
+
+    // User exists with this email - link Azure AD to existing account
+    console.log(`Linking Azure AD account to existing user: ${email} (was ${existingUser.auth_type}, has password: ${!!existingUser.password_hash})`);
+
+    const updateResult = await query(
+      `UPDATE user_profiles
+       SET azure_ad_object_id = $1,
+           full_name = COALESCE($2, full_name),
+           auth_type = 'azure_sso',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE email = $3
+       RETURNING id, azure_ad_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type, account_id as "accountId"`,
+      [azureAdObjectId, fullName, email]
+    );
+
+    const user = updateResult.rows[0];
+
+    console.log(`Successfully linked Azure AD to user ${user.id}. User can now authenticate with both Azure AD SSO and local password.`);
+
+    return {
+      id: user.id,
+      azureAdObjectId: user.azureAdObjectId,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      authType: 'azure_sso',
+      accountId: user.accountId,
+    };
+  }
+
+  // No existing user found - create new user
   // Check if this is the first user in the system
   const userCountResult = await query('SELECT COUNT(*) as count FROM user_profiles');
   const userCount = parseInt(userCountResult.rows[0].count);
@@ -262,17 +301,17 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
   // First user gets Promaster role, all others get 'user' role
   const role = userCount === 0 ? 'promaster' : 'user';
 
-  // Create new user profile if doesn't exist
+  // Create new user profile
   const insertResult = await query(
     `INSERT INTO user_profiles (azure_ad_object_id, email, full_name, role, auth_type)
      VALUES ($1, $2, $3, $4, 'azure_sso')
-     ON CONFLICT (email)
-     DO UPDATE SET azure_ad_object_id = EXCLUDED.azure_ad_object_id, full_name = EXCLUDED.full_name
      RETURNING id, azure_ad_object_id as "azureAdObjectId", email, full_name as "fullName", role, auth_type, account_id as "accountId"`,
     [azureAdObjectId, email, fullName, role]
   );
 
   const user = insertResult.rows[0];
+
+  console.log(`Created new Azure AD user: ${email} with role ${role}`);
 
   return {
     id: user.id,

@@ -179,16 +179,33 @@ export async function createLocalUser(
 
     // Check if user already exists
     const existingUser = await query(
-      'SELECT id FROM user_profiles WHERE email = $1',
+      'SELECT id, email, auth_type, azure_ad_object_id FROM user_profiles WHERE email = $1',
       [email]
     );
 
     if (existingUser.rows.length > 0) {
+      const user = existingUser.rows[0];
+
+      // If user has Azure AD linked, suggest using SSO
+      if (user.azure_ad_object_id) {
+        return {
+          status: 409,
+          headers: corsHeaders,
+          jsonBody: {
+            error: 'User with this email already exists and is linked to Azure AD SSO',
+            message: 'This email address is already registered. Please use the "Sign In with Microsoft" option to login.',
+            authType: 'azure_sso',
+          },
+        };
+      }
+
+      // Local user already exists
       return {
         status: 409,
         headers: corsHeaders,
         jsonBody: {
           error: 'User with this email already exists',
+          message: 'A user with this email address has already been created.',
         },
       };
     }
