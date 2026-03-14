@@ -11,16 +11,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { azureApi } from '@/lib/azureApi';
-import { UserPlus, Trash2, KeyRound, AlertCircle } from 'lucide-react';
+import { UserPlus, Trash2, KeyRound, AlertCircle, Pencil } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 
-interface AzureUser {
+interface AppUser {
   id: string;
-  displayName: string;
-  userPrincipalName: string;
-  accountEnabled: boolean;
-  createdDateTime: string;
+  email: string;
+  full_name: string | null;
+  role: 'user' | 'business_analyst' | 'promaster';
+  azure_ad_object_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface CreateUserFormData {
@@ -39,7 +41,8 @@ export default function UserManagement() {
   const queryClient = useQueryClient();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [resetPasswordDialogOpen, setResetPasswordDialogOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<AzureUser | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<AppUser | null>(null);
 
   const [formData, setFormData] = useState<CreateUserFormData>({
     email: '',
@@ -56,13 +59,18 @@ export default function UserManagement() {
     forceChangePassword: true,
   });
 
+  const [editFormData, setEditFormData] = useState({
+    email: '',
+    full_name: '',
+  });
+
   // Fetch local users
   const { data: users, isLoading, error } = useQuery({
     queryKey: ['local-users'],
     queryFn: async () => {
       const response = await azureApi.get('/user-profiles');
       if (response.error) throw new Error(response.error);
-      return response.data as AzureUser[];
+      return response.data as AppUser[];
     },
   });
 
@@ -157,6 +165,35 @@ export default function UserManagement() {
     },
   });
 
+  // Update user mutation
+  const updateUserMutation = useMutation({
+    mutationFn: async ({ userId, data }: { userId: string; data: any }) => {
+      const response = await azureApi.patch(`/user-profiles?id=${userId}`, data);
+      if (response.error) throw new Error(response.error);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['local-users'] });
+      setEditDialogOpen(false);
+      setSelectedUser(null);
+      setEditFormData({
+        email: '',
+        full_name: '',
+      });
+      toast({
+        title: 'User updated',
+        description: 'User information has been updated successfully',
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
   const handleCreateUser = () => {
     // Validation
     if (!formData.email || !formData.displayName || !formData.password) {
@@ -225,8 +262,29 @@ export default function UserManagement() {
     });
   };
 
-  const handleDeleteUser = (user: AzureUser) => {
-    if (confirm(`Are you sure you want to delete user "${user.displayName}"? This action cannot be undone.`)) {
+  const handleUpdateUser = () => {
+    if (!selectedUser) return;
+
+    if (!editFormData.email) {
+      toast({
+        title: 'Validation Error',
+        description: 'Email is required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    updateUserMutation.mutate({
+      userId: selectedUser.id,
+      data: {
+        email: editFormData.email,
+        full_name: editFormData.full_name || null,
+      },
+    });
+  };
+
+  const handleDeleteUser = (user: AppUser) => {
+    if (confirm(`Are you sure you want to delete user "${user.email}"? This action cannot be undone.`)) {
       deleteUserMutation.mutate(user.id);
     }
   };
@@ -408,7 +466,8 @@ export default function UserManagement() {
                   <TableRow>
                     <TableHead>Display Name</TableHead>
                     <TableHead>Email</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Auth Type</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -416,18 +475,38 @@ export default function UserManagement() {
                 <TableBody>
                   {users.map((user) => (
                     <TableRow key={user.id}>
-                      <TableCell className="font-medium">{user.displayName}</TableCell>
-                      <TableCell>{user.userPrincipalName}</TableCell>
+                      <TableCell className="font-medium">{user.full_name || 'N/A'}</TableCell>
+                      <TableCell>{user.email}</TableCell>
                       <TableCell>
-                        <Badge variant={user.accountEnabled ? 'default' : 'secondary'}>
-                          {user.accountEnabled ? 'Active' : 'Disabled'}
+                        <Badge variant={user.role === 'promaster' ? 'default' : user.role === 'business_analyst' ? 'secondary' : 'outline'}>
+                          {user.role === 'promaster' ? 'Promaster' : user.role === 'business_analyst' ? 'Business Analyst' : 'User'}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {new Date(user.createdDateTime).toLocaleDateString()}
+                        <div className="flex gap-1">
+                          {user.azure_ad_object_id && <Badge variant="outline">SSO</Badge>}
+                          <Badge variant="outline">Password</Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {new Date(user.created_at).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedUser(user);
+                              setEditFormData({
+                                email: user.email,
+                                full_name: user.full_name || '',
+                              });
+                              setEditDialogOpen(true);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"
@@ -462,7 +541,7 @@ export default function UserManagement() {
             <DialogHeader>
               <DialogTitle>Reset Password</DialogTitle>
               <DialogDescription>
-                Reset password for {selectedUser?.displayName}
+                Reset password for {selectedUser?.full_name || selectedUser?.email}
               </DialogDescription>
             </DialogHeader>
 
@@ -527,6 +606,67 @@ export default function UserManagement() {
                 disabled={resetPasswordMutation.isPending}
               >
                 {resetPasswordMutation.isPending ? 'Resetting...' : 'Reset Password'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit User Dialog */}
+        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit User</DialogTitle>
+              <DialogDescription>
+                Update user information for {selectedUser?.full_name || selectedUser?.email}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="editEmail">Email Address</Label>
+                <Input
+                  id="editEmail"
+                  type="email"
+                  value={editFormData.email}
+                  onChange={(e) =>
+                    setEditFormData({ ...editFormData, email: e.target.value })
+                  }
+                  placeholder="user@example.com"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="editFullName">Display Name</Label>
+                <Input
+                  id="editFullName"
+                  value={editFormData.full_name}
+                  onChange={(e) =>
+                    setEditFormData({ ...editFormData, full_name: e.target.value })
+                  }
+                  placeholder="John Doe"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setEditDialogOpen(false);
+                  setSelectedUser(null);
+                  setEditFormData({
+                    email: '',
+                    full_name: '',
+                  });
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleUpdateUser}
+                disabled={updateUserMutation.isPending}
+              >
+                {updateUserMutation.isPending ? 'Updating...' : 'Update User'}
               </Button>
             </DialogFooter>
           </DialogContent>
