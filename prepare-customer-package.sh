@@ -34,6 +34,7 @@ rm -f deployment-output.json
 rm -f deployment-info.txt
 rm -f app-registration.json
 rm -f DEPLOYMENT_INFO.txt
+rm -f DEPLOYMENT_SUMMARY.txt
 
 # Remove deployment-specific documentation
 echo "Removing deployment-specific documentation..."
