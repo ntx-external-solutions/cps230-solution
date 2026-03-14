@@ -73,17 +73,32 @@ read -p "Enable cost-optimized configuration? (Reduces costs ~90%, yes/no) [yes]
 COST_OPT=${COST_OPT:-yes}
 COST_OPTIMIZED=$([ "$COST_OPT" = "yes" ] && echo "true" || echo "false")
 
-print_section "Azure AD Configuration"
-read -p "Azure AD Tenant ID: " AZURE_TENANT_ID
-if [ -z "$AZURE_TENANT_ID" ]; then
-    print_error "Azure AD Tenant ID is required"
-    exit 1
-fi
+print_section "Azure AD SSO Configuration (Optional)"
+echo "Azure AD SSO is optional. You can:"
+echo "  1. Configure now for SSO authentication"
+echo "  2. Skip and use local database authentication only"
+echo "  3. Add Azure AD SSO later via Azure Portal"
+echo ""
+read -p "Configure Azure AD SSO now? (yes/no) [no]: " CONFIGURE_AZURE_AD
+CONFIGURE_AZURE_AD=${CONFIGURE_AZURE_AD:-no}
 
-read -p "Azure AD Client ID (App Registration): " AZURE_CLIENT_ID
-if [ -z "$AZURE_CLIENT_ID" ]; then
-    print_error "Azure AD Client ID is required"
-    exit 1
+if [ "$CONFIGURE_AZURE_AD" = "yes" ]; then
+    read -p "Azure AD Tenant ID: " AZURE_TENANT_ID
+    if [ -z "$AZURE_TENANT_ID" ]; then
+        print_error "Azure AD Tenant ID is required when configuring SSO"
+        exit 1
+    fi
+
+    read -p "Azure AD Client ID (App Registration): " AZURE_CLIENT_ID
+    if [ -z "$AZURE_CLIENT_ID" ]; then
+        print_error "Azure AD Client ID is required when configuring SSO"
+        exit 1
+    fi
+else
+    print_info "Skipping Azure AD SSO configuration"
+    print_info "The application will use local database authentication only"
+    AZURE_TENANT_ID=""
+    AZURE_CLIENT_ID=""
 fi
 
 # Confirm deployment
@@ -94,8 +109,13 @@ echo "Base Name: $BASE_NAME"
 echo "Admin Email: $ADMIN_EMAIL"
 echo "GitHub Repo: ${GITHUB_REPO:-Not specified}"
 echo "Cost Optimized: $COST_OPTIMIZED"
-echo "Azure AD Tenant ID: $AZURE_TENANT_ID"
-echo "Azure AD Client ID: $AZURE_CLIENT_ID"
+if [ -n "$AZURE_TENANT_ID" ]; then
+    echo "Azure AD SSO: Enabled"
+    echo "  - Tenant ID: $AZURE_TENANT_ID"
+    echo "  - Client ID: $AZURE_CLIENT_ID"
+else
+    echo "Azure AD SSO: Disabled (local authentication only)"
+fi
 echo
 if [ "$COST_OPTIMIZED" = "true" ]; then
     print_info "Cost-optimized mode: ~\$35-55/month (Burstable DB, Consumption Functions, Free Static Web App)"
@@ -191,34 +211,39 @@ fi
 
 unset POSTGRES_PASSWORD
 
-# Configure Azure AD and Function App FIRST (before backend deployment)
-print_section "Configuring Azure AD App Registration"
+# Configure Azure AD App Registration (if configured)
+if [ -n "$AZURE_CLIENT_ID" ]; then
+    print_section "Configuring Azure AD App Registration"
 
-print_info "Updating Azure AD app registration with SPA redirect URI: $STATIC_WEB_APP_URL"
+    print_info "Updating Azure AD app registration with SPA redirect URI: $STATIC_WEB_APP_URL"
 
-# Get existing SPA redirect URIs to preserve them
-EXISTING_URIS=$(az ad app show --id "$AZURE_CLIENT_ID" --query "spa.redirectUris" -o json 2>/dev/null || echo "[]")
+    # Get existing SPA redirect URIs to preserve them
+    EXISTING_URIS=$(az ad app show --id "$AZURE_CLIENT_ID" --query "spa.redirectUris" -o json 2>/dev/null || echo "[]")
 
-# Add the new URI if it doesn't exist
-if echo "$EXISTING_URIS" | grep -q "$STATIC_WEB_APP_URL"; then
-    print_info "Redirect URI already configured"
-else
-    # Create updated list with new URI
-    UPDATED_URIS=$(echo "$EXISTING_URIS" | jq --arg uri "$STATIC_WEB_APP_URL" '. + [$uri] | unique')
-
-    # Update the app registration using Graph API
-    az rest --method PATCH \
-        --uri "https://graph.microsoft.com/v1.0/applications(appId='$AZURE_CLIENT_ID')" \
-        --headers "Content-Type=application/json" \
-        --body "{\"spa\": {\"redirectUris\": $UPDATED_URIS}}" \
-        2>/dev/null
-
-    if [ $? -eq 0 ]; then
-        print_info "Azure AD app registration updated successfully (SPA platform)"
+    # Add the new URI if it doesn't exist
+    if echo "$EXISTING_URIS" | grep -q "$STATIC_WEB_APP_URL"; then
+        print_info "Redirect URI already configured"
     else
-        print_error "Failed to update Azure AD app registration"
-        print_warning "You may need to manually add the redirect URI to the SPA platform in the Azure Portal"
+        # Create updated list with new URI
+        UPDATED_URIS=$(echo "$EXISTING_URIS" | jq --arg uri "$STATIC_WEB_APP_URL" '. + [$uri] | unique')
+
+        # Update the app registration using Graph API
+        az rest --method PATCH \
+            --uri "https://graph.microsoft.com/v1.0/applications(appId='$AZURE_CLIENT_ID')" \
+            --headers "Content-Type=application/json" \
+            --body "{\"spa\": {\"redirectUris\": $UPDATED_URIS}}" \
+            2>/dev/null
+
+        if [ $? -eq 0 ]; then
+            print_info "Azure AD app registration updated successfully (SPA platform)"
+        else
+            print_error "Failed to update Azure AD app registration"
+            print_warning "You may need to manually add the redirect URI to the SPA platform in the Azure Portal"
+        fi
     fi
+else
+    print_section "Skipping Azure AD Configuration"
+    print_info "Azure AD SSO not configured - using local authentication only"
 fi
 
 print_section "Configuring Function App Settings"
@@ -358,22 +383,67 @@ Application URLs:
 - Web Application: $STATIC_WEB_APP_URL
 - API Endpoint: https://${FUNCTION_APP_NAME}.azurewebsites.net/api
 
-Azure AD Configuration:
-- Tenant ID: $AZURE_TENANT_ID
-- Client ID: $AZURE_CLIENT_ID
-- Redirect URI: $STATIC_WEB_APP_URL
+Authentication Configuration:
+EOF
+
+if [ -n "$AZURE_TENANT_ID" ]; then
+cat >> deployment-info.txt << EOF
+- Mode: Azure AD SSO + Local Authentication
+- Azure AD Tenant ID: $AZURE_TENANT_ID
+- Azure AD Client ID: $AZURE_CLIENT_ID
+- Azure AD Redirect URI: $STATIC_WEB_APP_URL
+EOF
+else
+cat >> deployment-info.txt << EOF
+- Mode: Local Authentication Only
+- Azure AD: Not configured (can be added later)
+EOF
+fi
+
+cat >> deployment-info.txt << EOF
 
 Deployment Status:
 ✅ Infrastructure deployed
 ✅ Database initialized
 ✅ Backend deployed
+EOF
+
+if [ -n "$AZURE_TENANT_ID" ]; then
+cat >> deployment-info.txt << EOF
 ✅ Azure AD app registration configured
+EOF
+else
+cat >> deployment-info.txt << EOF
+⚪ Azure AD SSO skipped (using local auth only)
+EOF
+fi
+
+cat >> deployment-info.txt << EOF
 ✅ Function App environment variables set
 ✅ Frontend built and deployed
 
 Next Steps:
 1. Access the application at: $STATIC_WEB_APP_URL
+EOF
+
+if [ -n "$AZURE_TENANT_ID" ]; then
+cat >> deployment-info.txt << EOF
 2. Sign in with Azure AD - first user will automatically get 'promaster' role
+   OR create a local user account (first user will get 'promaster' role)
+EOF
+else
+cat >> deployment-info.txt << EOF
+2. Create your first user account at the login page
+   - First user will automatically get 'promaster' (admin) role
+   - Use email and password for authentication
+3. (Optional) Configure Azure AD SSO later via Function App settings:
+   - Add AZURE_TENANT_ID and AZURE_CLIENT_ID to Function App
+   - Add VITE_AZURE_TENANT_ID, VITE_AZURE_CLIENT_ID to Static Web App
+   - Rebuild and redeploy frontend
+EOF
+fi
+
+cat >> deployment-info.txt << EOF
 3. Configure Process Manager credentials in Settings
 4. Test sync with Nintex Process Manager
 5. Add other users as needed
@@ -395,17 +465,35 @@ echo "✅ Deployment Status:"
 echo "  • Infrastructure deployed (cost-optimized: $COST_OPTIMIZED)"
 echo "  • Database initialized with schema"
 echo "  • Backend deployed (14 HTTP functions)"
-echo "  • Azure AD app registration configured"
+if [ -n "$AZURE_TENANT_ID" ]; then
+    echo "  • Azure AD SSO configured"
+else
+    echo "  • Local authentication configured (Azure AD SSO skipped)"
+fi
 echo "  • Function App environment variables set"
 echo "  • Frontend built and deployed"
 echo
 echo "🎯 Next Steps:"
 echo "  1. Visit: $STATIC_WEB_APP_URL"
-echo "  2. Sign in with Azure AD (first user gets 'promaster' role automatically)"
+if [ -n "$AZURE_TENANT_ID" ]; then
+    echo "  2. Sign in with Azure AD OR create a local account"
+    echo "     (First user gets 'promaster' role automatically)"
+else
+    echo "  2. Create your first user account (gets 'promaster' role automatically)"
+    echo "     Use email and password for authentication"
+fi
 echo "  3. Configure Process Manager credentials in Settings"
 echo "  4. Test sync with Nintex Process Manager"
 echo "  5. Add other users as needed"
 echo
+if [ -z "$AZURE_TENANT_ID" ]; then
+    echo "💡 To add Azure AD SSO later:"
+    echo "   - Create Azure AD App Registration"
+    echo "   - Update Function App settings (AZURE_TENANT_ID, AZURE_CLIENT_ID)"
+    echo "   - Update Static Web App settings (VITE_AZURE_TENANT_ID, VITE_AZURE_CLIENT_ID)"
+    echo "   - Rebuild and redeploy frontend"
+    echo
+fi
 echo "📄 Full deployment details saved to: deployment-info.txt"
 echo
 
