@@ -37,7 +37,7 @@ export async function processesFunction(
 
     // Set session context for RLS
     const pool = getPool();
-    await setSessionContext(pool, userProfile.azureAdObjectId, userProfile.role, userProfile.accountId);
+    await setSessionContext(pool, userProfile.id, userProfile.azureAdObjectId, userProfile.role);
 
     const url = new URL(request.url);
     const id = url.searchParams.get('id');

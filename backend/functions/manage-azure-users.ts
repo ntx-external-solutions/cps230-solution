@@ -102,7 +102,7 @@ async function createAzureUser(
 
     // Create user profile in database
     const pool = getPool();
-    await setSessionContext(pool, userProfile.azureAdObjectId, userProfile.role, userProfile.accountId);
+    await setSessionContext(pool, userProfile.id, userProfile.azureAdObjectId, userProfile.role);
 
     const dbResult = await query(
       `INSERT INTO user_profiles (
@@ -271,7 +271,7 @@ async function deleteAzureUser(
 
     // Delete from database (optional - could also keep for audit trail)
     const pool = getPool();
-    await setSessionContext(pool, userProfile.azureAdObjectId, userProfile.role, userProfile.accountId);
+    await setSessionContext(pool, userProfile.id, userProfile.azureAdObjectId, userProfile.role);
 
     await query(
       'DELETE FROM user_profiles WHERE azure_ad_object_id = $1',

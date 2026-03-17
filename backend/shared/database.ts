@@ -81,21 +81,21 @@ export async function withTransaction<T>(
 /**
  * Set session variables for RLS policies
  * @param client Database client
- * @param azureAdObjectId User's Azure AD object ID (or user ID for local users)
+ * @param userId User's ID (used for local users)
+ * @param azureAdObjectId User's Azure AD object ID (for Azure AD SSO users)
  * @param role User's role
- * @param accountId User's account ID
  */
 export async function setSessionContext(
   client: PoolClient | Pool,
+  userId: string,
   azureAdObjectId: string | undefined,
-  role: string,
-  accountId?: string
+  role: string
 ): Promise<void> {
   await client.query(
-    `SELECT set_config('app.current_user_azure_id', $1, false),
-            set_config('app.current_user_role', $2, false),
-            set_config('app.current_account_id', $3, false)`,
-    [azureAdObjectId || '', role, accountId || '']
+    `SELECT set_config('app.current_user_id', $1, false),
+            set_config('app.current_user_azure_id', $2, false),
+            set_config('app.current_user_role', $3, false)`,
+    [userId, azureAdObjectId || '', role]
   );
 }
 

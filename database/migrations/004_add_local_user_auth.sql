@@ -13,12 +13,12 @@ ALTER COLUMN azure_ad_object_id DROP NOT NULL;
 ALTER TABLE public.user_profiles
 ADD COLUMN IF NOT EXISTS auth_type TEXT DEFAULT 'azure_sso' CHECK (auth_type IN ('azure_sso', 'local'));
 
--- Add constraint: either azure_ad_object_id OR password_hash must be present
-ALTER TABLE public.user_profiles
-ADD CONSTRAINT check_auth_method CHECK (
-  (azure_ad_object_id IS NOT NULL AND password_hash IS NULL) OR
-  (azure_ad_object_id IS NULL AND password_hash IS NOT NULL)
-);
+-- NOTE: Constraint removed to support unified authentication
+-- Users can have both Azure AD SSO and local password authentication
+-- The auth_type field tracks which method is currently being used
+-- Original constraint was:
+-- CHECK ((azure_ad_object_id IS NOT NULL AND password_hash IS NULL) OR
+--        (azure_ad_object_id IS NULL AND password_hash IS NOT NULL))
 
 -- Update unique constraint on azure_ad_object_id to allow NULLs
 -- Drop old constraint
@@ -119,6 +119,5 @@ CREATE POLICY "Authenticated users can view sync history"
 CREATE INDEX IF NOT EXISTS idx_user_profiles_email_auth_type
 ON public.user_profiles(email, auth_type);
 
-COMMENT ON COLUMN public.user_profiles.password_hash IS 'Bcrypt password hash for local auth users (null for Azure AD SSO users)';
-COMMENT ON COLUMN public.user_profiles.auth_type IS 'Authentication type: azure_sso (federated) or local (username/password)';
-COMMENT ON CONSTRAINT check_auth_method ON public.user_profiles IS 'Ensures user has either Azure AD ID or password hash, but not both';
+COMMENT ON COLUMN public.user_profiles.password_hash IS 'Bcrypt password hash for local auth users (can coexist with Azure AD SSO for unified authentication)';
+COMMENT ON COLUMN public.user_profiles.auth_type IS 'Authentication type: azure_sso (federated) or local (username/password) - users can have both methods available';

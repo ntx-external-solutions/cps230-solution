@@ -47,7 +47,7 @@ export async function createUserFunction(
 
     // Set session context for RLS
     const pool = getPool();
-    await setSessionContext(pool, userProfile.azureAdObjectId, userProfile.role, userProfile.accountId);
+    await setSessionContext(pool, userProfile.id, userProfile.azureAdObjectId, userProfile.role);
 
     const body = await request.json() as any;
 
