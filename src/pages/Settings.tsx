@@ -22,7 +22,7 @@ export default function Settings() {
   const updateSettings = useUpdateSetting();
   const syncPM = useSyncProcessManager();
   const cancelSync = useCancelSync();
-  const { data: latestSync } = useLatestSync();
+  const { data: latestSync } = useLatestSync(true); // Enable polling only on Settings page
 
   // Poll sync history when there's an active sync
   const isSyncing = latestSync?.status === 'in_progress';

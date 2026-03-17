@@ -411,29 +411,71 @@ async function handleSync(
 
         const processData = await processResponse.json() as any;
 
-        // Extract tags from process data
-        const tags = processData.tags || processData.tagList || [];
-        const tagArray = Array.isArray(tags) ? tags : [];
+        // Process name and metadata are inside the processJson object
+        const processJson = processData.processJson || {};
+
+        context.log(`Process ${processUniqueId} processJson keys:`, Object.keys(processJson).join(', '));
+
+        // Extract process name and metadata from processJson
+        const processName = processJson.Name || null;
+        const processExpert = processJson.Expert || null;  // It's a string, not an object
+        const processOwner = processJson.Owner || null;    // It's a string, not an object
+        const processStatus = processJson.State || null;
+
+        // Extract tags from activities
+        const tagSet = new Set<string>();
+        const regionSet = new Set<string>();
+        const activities = processJson.ProcessProcedures?.Activity || [];
+        for (const activity of activities) {
+          const activityTags = activity.Ownerships?.Tag || [];
+          for (const tag of activityTags) {
+            if (tag.Name) {
+              tagSet.add(tag.Name);
+            }
+          }
+
+          // Extract region codes from role names
+          const activityRoles = activity.Ownerships?.Role || [];
+          for (const role of activityRoles) {
+            if (role.Name) {
+              // Look for pattern like "Team - UK" or "Team Name - AU"
+              // Extract text after the last " - "
+              const match = role.Name.match(/\s-\s([A-Z]{2,10})$/i);
+              if (match) {
+                const regionCode = match[1].toUpperCase();
+                regionSet.add(regionCode);
+              }
+            }
+          }
+        }
+        const tagArray = Array.from(tagSet);
+        const regionCodes = Array.from(regionSet);
 
         // Check if #CPS230 tag exists
         const isCPS230Tagged = tagArray.some((tag: string) =>
           tag && tag.toLowerCase().includes('cps230')
         );
 
-        // Extract process expert
-        const processExpert = processData.expertName || processData.processExpert ||
-                             processData.expert || null;
+        // Insert discovered regions into the regions table (if they don't exist)
+        for (const regionCode of regionCodes) {
+          try {
+            await client.query(
+              `INSERT INTO regions (region_code, modified_by)
+               VALUES ($1, $2)
+               ON CONFLICT (region_code) DO NOTHING`,
+              [regionCode, userProfile.email]
+            );
+          } catch (regionError) {
+            context.warn(`Failed to insert region ${regionCode}:`, regionError);
+          }
+        }
 
-        // Extract process status
-        const processStatus = processData.status || processData.publishState || null;
-
-        // Extract full owner and expert objects if available
-        const ownerData = processData.owner || null;
-        const expertData = processData.expertData || processData.expert || null;
+        // Owner and Expert are strings in this API, not objects
+        // Store them as simple JSON for consistency
+        const ownerData = processOwner ? { name: processOwner } : null;
+        const expertData = processExpert ? { name: processExpert } : null;
 
         // Extract process metadata (inputs, outputs, triggers, targets)
-        const processJson = processData.processJson || processData;
-
         const inputs = processJson.Inputs?.Input || null;
         const outputs = processJson.Outputs?.Output || null;
         const triggers = processJson.Triggers?.Trigger || null;
@@ -477,18 +519,20 @@ async function handleSync(
             modified_date = NOW()
           `,
           [
-            processData.name,
+            processName,
             processUniqueId,
-            processData.ownerName || null,
+            processOwner,
             processExpert,
             processStatus,
             ownerData ? JSON.stringify(ownerData) : null,
             expertData ? JSON.stringify(expertData) : null,
             JSON.stringify({
-              referenceNo: processData.referenceNo,
-              processGroup: processData.processGroupName,
-              version: processData.version,
-              publishState: processData.publishState,
+              referenceNo: processJson.ReferenceNo || '',
+              processGroup: processJson.Group || '',
+              version: processJson.Version || '',
+              publishState: processJson.State || '',
+              objective: processJson.Objective || '',
+              background: processJson.Background || '',
             }),
             isCPS230Tagged,
             tagArray,

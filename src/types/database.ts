@@ -153,6 +153,35 @@ export interface Database {
           account_id?: string | null
         }
       }
+      regions: {
+        Row: {
+          id: string
+          region_code: string
+          region_name: string | null
+          description: string | null
+          modified_by: string | null
+          modified_date: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          region_code: string
+          region_name?: string | null
+          description?: string | null
+          modified_by?: string | null
+          modified_date?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          region_code?: string
+          region_name?: string | null
+          description?: string | null
+          modified_by?: string | null
+          modified_date?: string
+          created_at?: string
+        }
+      }
       critical_operations: {
         Row: {
           id: string
@@ -404,6 +433,7 @@ export type UserRole = Database['public']['Enums']['user_role'];
 export type Account = Database['public']['Tables']['accounts']['Row'];
 export type Process = Database['public']['Tables']['processes']['Row'];
 export type System = Database['public']['Tables']['systems']['Row'];
+export type Region = Database['public']['Tables']['regions']['Row'];
 export type CriticalOperation = Database['public']['Tables']['critical_operations']['Row'];
 export type Control = Database['public']['Tables']['controls']['Row'];
 export type UserProfile = Database['public']['Tables']['user_profiles']['Row'];

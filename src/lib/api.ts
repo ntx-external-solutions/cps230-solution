@@ -1,5 +1,5 @@
 import azureApi from './azureApi';
-import type { System, Process, Control, CriticalOperation, Setting, UserProfile, SyncHistory } from '@/types/database';
+import type { System, Region, Process, Control, CriticalOperation, Setting, UserProfile, SyncHistory } from '@/types/database';
 
 // ============================================================================
 // SYSTEMS API
@@ -49,6 +49,60 @@ export const systemsApi = {
 
   delete: async (id: string): Promise<void> => {
     const response = await azureApi.systems.delete(id);
+    if (response.error) {
+      throw new Error(response.error);
+    }
+  },
+};
+
+// ============================================================================
+// REGIONS API
+// ============================================================================
+
+export const regionsApi = {
+  getAll: async (): Promise<Region[]> => {
+    const response = await azureApi.regions.list();
+    if (response.error) {
+      throw new Error(response.error);
+    }
+    return response.data || [];
+  },
+
+  getById: async (id: string): Promise<Region> => {
+    const response = await azureApi.regions.get(id);
+    if (response.error) {
+      throw new Error(response.error);
+    }
+    if (!response.data) {
+      throw new Error('Region not found');
+    }
+    return response.data;
+  },
+
+  create: async (region: Omit<Region, 'id' | 'created_at' | 'modified_date' | 'modified_by'>): Promise<Region> => {
+    const response = await azureApi.regions.create(region);
+    if (response.error) {
+      throw new Error(response.error);
+    }
+    if (!response.data) {
+      throw new Error('Failed to create region');
+    }
+    return response.data;
+  },
+
+  update: async (id: string, updates: Partial<Omit<Region, 'id' | 'created_at'>>): Promise<Region> => {
+    const response = await azureApi.regions.update(id, updates);
+    if (response.error) {
+      throw new Error(response.error);
+    }
+    if (!response.data) {
+      throw new Error('Failed to update region');
+    }
+    return response.data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    const response = await azureApi.regions.delete(id);
     if (response.error) {
       throw new Error(response.error);
     }

@@ -113,6 +113,23 @@ export const azureApi = {
     }),
   },
 
+  // Regions
+  regions: {
+    list: () => apiCall<any[]>('regions'),
+    get: (id: string) => apiCall<any>(`regions?id=${id}`),
+    create: (data: any) => apiCall<any>('regions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    update: (id: string, data: any) => apiCall<any>(`regions?id=${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+    delete: (id: string) => apiCall<any>(`regions?id=${id}`, {
+      method: 'DELETE',
+    }),
+  },
+
   // Controls
   controls: {
     list: () => apiCall<any[]>('controls'),

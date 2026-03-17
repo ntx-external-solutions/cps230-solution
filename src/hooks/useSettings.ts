@@ -32,39 +32,10 @@ export function useSyncProcessManager() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (onProgress?: (progress: { processed: number; total: number; percentComplete: number }) => void) => {
-      // Phase 1: Initialize sync
-      const initResponse = await syncProcessManagerApi.init();
-      console.log('Sync initialized:', initResponse);
-
-      // Phase 2: Process batches until complete
-      let isComplete = false;
-      let response;
-
-      while (!isComplete) {
-        response = await syncProcessManagerApi.processBatch();
-        console.log('Batch processed:', response);
-
-        // Report progress to caller
-        if (onProgress) {
-          onProgress({
-            processed: response.processed,
-            total: response.total,
-            percentComplete: response.percentComplete,
-          });
-        }
-
-        // Check if sync is complete
-        if (response.completed || response.remaining === 0) {
-          isComplete = true;
-        }
-
-        // Small delay between batches to avoid overwhelming the API
-        if (!isComplete) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-
+    mutationFn: async () => {
+      // Single sync call - backend handles everything
+      const response = await syncProcessManagerApi.sync();
+      console.log('Sync completed:', response);
       return response;
     },
     onSuccess: () => {
@@ -84,11 +55,16 @@ export function useSyncHistory(refetchInterval?: number) {
   });
 }
 
-export function useLatestSync() {
+export function useLatestSync(enablePolling: boolean = false) {
   return useQuery({
     queryKey: ['latest-sync'],
     queryFn: () => syncHistoryApi.getLatest(),
-    refetchInterval: 30000, // Poll every 30 seconds
+    refetchInterval: (query) => {
+      // Only poll if enabled and there's an active sync
+      if (!enablePolling) return false;
+      const latestSync = query.state.data as any;
+      return latestSync?.status === 'in_progress' ? 5000 : false;
+    },
   });
 }
 
