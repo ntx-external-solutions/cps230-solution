@@ -226,6 +226,7 @@ async function handleSync(
     // Step 1: Authenticate with Process Manager using OAuth2
     // Construct full URL: regional domain + site identifier
     const fullSiteUrl = `${siteUrl}/${tenantId}`;
+    context.log(`Constructed fullSiteUrl: ${fullSiteUrl} (siteUrl: ${siteUrl}, tenantId: ${tenantId})`);
     const tokenUrl = `https://${fullSiteUrl}/oauth2/token`;
     const authBody = new URLSearchParams({
       grant_type: 'password',
@@ -272,7 +273,19 @@ async function handleSync(
       throw new Error(`Failed to get search token: ${searchTokenResponse.status} ${searchTokenResponse.statusText} - ${errorText}`);
     }
 
-    const searchToken = await searchTokenResponse.text(); // Returns plain text token
+    const responseText = await searchTokenResponse.text();
+
+    // Try parsing as JSON first (search token might be in various formats)
+    let searchToken: string;
+    try {
+      const data = JSON.parse(responseText);
+      // Search for token in various possible field names
+      searchToken = data.Message || data.access_token || data.token || data.Token || data.AccessToken || responseText;
+    } catch (e) {
+      // If not JSON, the response might be the token itself
+      searchToken = responseText;
+    }
+
     context.log('Successfully obtained search service token');
 
     // Step 3: Map site URL to search endpoint
@@ -282,15 +295,17 @@ async function handleSync(
     // Step 4: Search for processes tagged with #CPS230
     const searchUrl = `https://${searchEndpoint}/fullsearch`;
     const searchParams = new URLSearchParams({
-      SearchCriteria: '#CPS230',
-      IncludedTypes: '1', // 1 = processes
+      SearchCriteria: '#cps230', // URLSearchParams will encode this to %23cps230 (case-insensitive search)
+      IncludedTypes: '1', // 1 = processes (0 = all, 1 = processes only)
       SearchMatchType: '0',
       pageNumber: '1',
       PageSize: '100',
     });
 
-    context.log('Searching for #CPS230 tagged processes...');
-    const searchResponse = await fetch(`${searchUrl}?${searchParams}`, {
+    const fullSearchUrl = `${searchUrl}?${searchParams}`;
+    context.log(`Searching for #CPS230 tagged processes at: ${fullSearchUrl}`);
+
+    const searchResponse = await fetch(fullSearchUrl, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${searchToken}`,
@@ -304,11 +319,46 @@ async function handleSync(
 
     const searchData = await searchResponse.json() as any;
 
-    // Extract process unique IDs from search results
-    const allHighlights = searchData?.response || [];
-    const processUniqueIds = allHighlights
-      .filter((result: any) => result.highlightedResult?.toLowerCase().includes('cps230'))
-      .map((result: any) => result.id);
+    context.log(`Search API returned ${searchData.response?.length || 0} results. Success: ${searchData.success}`);
+
+    if (!searchData.success) {
+      context.error('Search API returned unsuccessful response:', searchData);
+      throw new Error('Search API returned unsuccessful response');
+    }
+
+    // Filter results that have CPS230 in highlights
+    const cps230Processes = (searchData.response || []).filter((result: any) => {
+      const highlights = result.HighLights;
+      if (!highlights) {
+        return true; // If search returned it for "CPS230", include it
+      }
+
+      // Check all highlight types for #CPS230
+      const allHighlights = [
+        ...(highlights.Activities || []),
+        ...(highlights.Tasks || []),
+        ...(highlights.LeanTags || []),
+        ...(highlights.ProcessTags || []),
+      ].join(' ');
+
+      return allHighlights.includes('#CPS230') || allHighlights.includes('#cps230') || allHighlights.includes('CPS230');
+    });
+
+    // Extract unique IDs from ProcessUniqueId or ItemUrl
+    const processUniqueIds = cps230Processes
+      .map((p: any) => {
+        if (p.ProcessUniqueId) {
+          return p.ProcessUniqueId;
+        }
+        if (p.ItemUrl) {
+          const match = p.ItemUrl.match(/\/Process\/([a-f0-9-]+)/i);
+          if (match && match[1]) {
+            return match[1];
+          }
+        }
+        return null;
+      })
+      .filter((id: any) => id); // Filter out any null/undefined
 
     context.log(`Found ${processUniqueIds.length} processes with #CPS230 tag`);
 
@@ -342,8 +392,8 @@ async function handleSync(
     for (const processUniqueId of processUniqueIds) {
       try {
         // Fetch detailed process data using the site token (not search token)
-        const processUrl = `https://${fullSiteUrl}/api/process/${processUniqueId}`;
-        context.log(`Fetching process details for ${processUniqueId}...`);
+        const processUrl = `https://${fullSiteUrl}/Api/v1/Processes/${processUniqueId}`;
+        context.log(`Fetching process details from: ${processUrl}`);
         const processResponse = await fetch(processUrl, {
           method: 'GET',
           headers: {

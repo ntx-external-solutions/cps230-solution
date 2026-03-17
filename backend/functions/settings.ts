@@ -206,8 +206,8 @@ async function handlePost(
 
   const result = await query(
     `INSERT INTO settings (
-      key, value, description, is_sensitive, modified_by, account_id
-    ) VALUES ($1, $2, $3, $4, $5, $6)
+      key, value, description, is_sensitive, modified_by
+    ) VALUES ($1, $2, $3, $4, $5)
     RETURNING *`,
     [
       validatedData.key,
@@ -215,7 +215,6 @@ async function handlePost(
       validatedData.description || null,
       validatedData.is_sensitive || false,
       userProfile.email,
-      userProfile.accountId || null,
     ]
   );
 
@@ -295,9 +294,9 @@ async function handleUpdate(
   } else if (key) {
     // Use UPSERT pattern to create setting if it doesn't exist
     result = await query(
-      `INSERT INTO settings (key, value, description, is_sensitive, modified_by, account_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (key, account_id)
+      `INSERT INTO settings (key, value, description, is_sensitive, modified_by)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (key)
        DO UPDATE SET
          value = COALESCE($2, settings.value),
          description = COALESCE($3, settings.description),
@@ -311,7 +310,6 @@ async function handleUpdate(
         sanitized.description,
         sanitized.is_sensitive,
         userProfile.email,
-        userProfile.accountId || null,
       ]
     );
   } else {

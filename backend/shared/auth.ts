@@ -183,19 +183,25 @@ export async function authenticateRequestUnified(request: HttpRequest): Promise<
   try {
     const localPayload = verifyLocalUserToken(token);
 
-    // Get user from database to ensure they still exist
+    // Get user from database to ensure they still exist and have a password hash
     const result = await query(
-      `SELECT id, email, full_name, role, auth_type
+      `SELECT id, email, full_name, role, auth_type, password_hash
        FROM user_profiles
-       WHERE id = $1 AND auth_type = 'local'`,
+       WHERE id = $1 AND password_hash IS NOT NULL`,
       [localPayload.userId]
     );
 
     if (result.rows.length === 0) {
-      throw new Error('User not found');
+      throw new Error('User not found or password authentication not enabled');
     }
 
     const user = result.rows[0];
+
+    // Update auth_type to reflect current login method
+    await query(
+      `UPDATE user_profiles SET auth_type = 'local', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [user.id]
+    );
 
     return {
       id: user.id,
@@ -242,6 +248,13 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
 
   if (azureAdResult.rows.length > 0) {
     const user = azureAdResult.rows[0];
+
+    // Update auth_type to reflect current login method
+    await query(
+      `UPDATE user_profiles SET auth_type = 'azure_sso', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [user.id]
+    );
+
     return {
       id: user.id,
       azureAdObjectId: user.azureAdObjectId,

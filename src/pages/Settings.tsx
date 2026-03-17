@@ -244,7 +244,7 @@ export default function Settings() {
                   ) : (
                     <>
                       <div className="space-y-2">
-                        <Label htmlFor="site-url">Site URL</Label>
+                        <Label htmlFor="site-url">Base URL</Label>
                         <Input
                           id="site-url"
                           type="text"
@@ -253,12 +253,12 @@ export default function Settings() {
                           onChange={(e) => setSiteUrl(e.target.value)}
                         />
                         <p className="text-xs text-muted-foreground">
-                          Your Process Manager site URL (without https://)
+                          Process Manager base URL (e.g., demo.promapp.com)
                         </p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="tenant-id">Tenant ID</Label>
+                        <Label htmlFor="tenant-id">Site ID</Label>
                         <Input
                           id="tenant-id"
                           type="text"
@@ -267,7 +267,7 @@ export default function Settings() {
                           onChange={(e) => setTenantId(e.target.value)}
                         />
                         <p className="text-xs text-muted-foreground">
-                          Your tenant ID from the Process Manager URL
+                          Site identifier from your Process Manager URL (can be any value like "Contoso", "TestSite", or a GUID)
                         </p>
                       </div>
 
