@@ -1,6 +1,8 @@
-# CPS230 Critical Operations Ecosystem - Azure Deployment
+# CPS230 Critical Operations Ecosystem
 
-A production-ready solution for managing critical operations processes in alignment with APRA CPS230 regulations. This version is designed for deployment to Microsoft Azure with a near one-click deployment experience.
+> **🚀 NEW USER? START HERE:** See **[START_HERE.md](START_HERE.md)** for a 30-minute deployment guide!
+
+A production-ready solution for managing critical operations processes in alignment with APRA CPS230 regulations. This version is designed for deployment to Microsoft Azure with automated deployment scripts.
 
 ## Features
 
@@ -9,49 +11,45 @@ A production-ready solution for managing critical operations processes in alignm
 - **Role-Based Access Control**: Three-tier access system (User, Business Analyst, Promaster)
 - **Nintex Integration**: Synchronize processes from Nintex Process Manager
 - **Azure-Native Architecture**: Fully integrated with Azure services for enterprise-grade reliability
+- **Dual Authentication**: Supports both Azure AD SSO and local database users
+- **Dark Mode**: Full theme support (light/dark/system)
 
 ## Architecture
 
 - **Frontend**: Azure Static Web Apps (React + TypeScript + Vite)
-- **Backend**: Azure Functions (Node.js 20)
-- **Database**: Azure Database for PostgreSQL Flexible Server
-- **Authentication**: Dual authentication (Azure AD SSO + Local Database)
+- **Backend**: Azure Functions (Node.js 20) - 17 serverless HTTP endpoints
+- **Database**: Azure Database for PostgreSQL Flexible Server with Row-Level Security
+- **Authentication**: Dual authentication (Azure AD SSO + bcrypt-hashed local users with JWT)
 - **Secrets Management**: Azure Key Vault
 - **Monitoring**: Application Insights + Log Analytics
 
-## Quick Deployment
+## Quick Start (First Time Users)
 
-### Prerequisites
+**👉 See [START_HERE.md](START_HERE.md) for the complete quick-start guide**
 
-- Azure subscription with Owner or Contributor access
-- Azure CLI installed ([Install Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli))
-- Optional: GitHub account for CI/CD integration
-
-### Deploy to Azure
-
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FYOUR_ORG%2Fcps230-solution%2Fmain%2Finfrastructure%2Fmain.json)
-
-**OR** use Azure CLI:
+Or use the automated deployment script:
 
 ```bash
 # 1. Login to Azure
 az login
 
-# 2. Set your subscription
-az account set --subscription "Your-Subscription-Name"
+# 2. Run automated deployment (handles everything!)
+./deploy.sh
 
-# 3. Deploy infrastructure
-az deployment sub create \
-  --location australiaeast \
-  --template-file infrastructure/main.bicep \
-  --parameters \
-    environmentName=prod \
-    baseName=cps230 \
-    postgresAdminPassword='YourSecurePassword123!' \
-    initialAdminEmail='admin@yourcompany.com'
+# You'll be prompted for:
+# - Environment (dev/prod)
+# - Azure region
+# - Admin email
+# - PostgreSQL password
+# - Azure AD settings (optional)
 ```
 
-The deployment will take approximately 15-20 minutes to complete.
+The deployment will take approximately 15-20 minutes and creates:
+- PostgreSQL database
+- 17 Azure Functions for the API
+- Static Web App for the frontend
+- Application Insights for monitoring
+- All necessary security configurations
 
 ### Post-Deployment Setup
 
@@ -193,11 +191,18 @@ cps230-solution/
 
 ## Documentation
 
-- [Deployment Guide](docs/DEPLOYMENT.md) - Detailed deployment instructions
-- [Configuration Reference](docs/CONFIGURATION.md) - Complete configuration guide
-- [Dual Authentication Setup](DUAL_AUTH_SETUP_GUIDE.md) - Authentication configuration
-- [Architecture Overview](docs/ARCHITECTURE.md) - System architecture details
-- [API Documentation](docs/API.md) - Backend API reference
+### Getting Started
+- **[START_HERE.md](START_HERE.md)** - **⭐ Start here!** Complete 30-minute deployment guide
+- [CUSTOMER_DEPLOYMENT_CHECKLIST.md](CUSTOMER_DEPLOYMENT_CHECKLIST.md) - Pre/post deployment checklist
+
+### Detailed Guides
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) - Detailed deployment instructions
+- [docs/QUICK_START_DEPLOYMENT.md](docs/QUICK_START_DEPLOYMENT.md) - Quick deployment for testing
+- [.env.example](.env.example) - All environment variables explained
+
+### Development
+- [docs/UNIFIED_USER_AUTHENTICATION.md](docs/UNIFIED_USER_AUTHENTICATION.md) - Authentication system details
+- Database migrations in `database/migrations/` - Schema change history
 
 ## Updating the Application
 
