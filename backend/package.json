@@ -20,7 +20,8 @@
     "bcryptjs": "^3.0.3",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^3.1.0",
-    "pg": "^8.11.3"
+    "pg": "^8.11.3",
+    "typescript": "^5.3.3"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
@@ -30,8 +31,7 @@
     "azure-functions-core-tools": "^4.0.5530",
     "jest": "^29.7.0",
     "rimraf": "^5.0.5",
-    "ts-jest": "^29.4.6",
-    "typescript": "^5.3.3"
+    "ts-jest": "^29.4.6"
   },
   "engines": {
     "node": ">=20.0.0"

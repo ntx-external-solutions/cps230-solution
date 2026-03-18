@@ -3,6 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ProcessesTable } from '@/components/tables/ProcessesTable';
 import { SystemsTable } from '@/components/tables/SystemsTable';
+import { RegionsTable } from '@/components/tables/RegionsTable';
 import { CriticalOperationsTable } from '@/components/tables/CriticalOperationsTable';
 import { ControlsTable } from '@/components/tables/ControlsTable';
 
@@ -13,6 +14,7 @@ export default function Data() {
         <TabsList>
           <TabsTrigger value="processes">Processes</TabsTrigger>
           <TabsTrigger value="systems">Systems</TabsTrigger>
+          <TabsTrigger value="regions">Regions</TabsTrigger>
           <TabsTrigger value="critical-operations">Critical Operations</TabsTrigger>
           <TabsTrigger value="controls">Controls</TabsTrigger>
         </TabsList>
@@ -41,6 +43,20 @@ export default function Data() {
             </CardHeader>
             <CardContent>
               <SystemsTable />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="regions">
+          <Card>
+            <CardHeader>
+              <CardTitle>Regions</CardTitle>
+              <CardDescription>
+                View and manage geographic regions for processes and controls
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <RegionsTable />
             </CardContent>
           </Card>
         </TabsContent>

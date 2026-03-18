@@ -6,6 +6,7 @@ import './functions/create-user';
 import './functions/user-profiles';
 import './functions/processes';
 import './functions/systems';
+import './functions/regions';
 import './functions/controls';
 import './functions/critical-operations';
 import './functions/process-systems';
