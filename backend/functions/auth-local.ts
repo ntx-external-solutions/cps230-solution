@@ -43,7 +43,23 @@ export async function localLogin(
       };
     }
 
-    // Find user by email
+    // First check if user exists with SSO auth type
+    const ssoCheck = await query(
+      `SELECT auth_type FROM user_profiles WHERE email = $1`,
+      [body.email.toLowerCase()]
+    );
+
+    if (ssoCheck.rows.length > 0 && ssoCheck.rows[0].auth_type === 'azure_sso') {
+      return {
+        status: 401,
+        headers: corsHeaders,
+        jsonBody: {
+          error: 'This account uses Single Sign-On (SSO). Please sign in with Microsoft SSO instead.',
+        },
+      };
+    }
+
+    // Find user by email with local auth type
     const result = await query(
       `SELECT id, email, full_name, role, password_hash, auth_type
        FROM user_profiles

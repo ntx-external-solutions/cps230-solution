@@ -61,7 +61,9 @@ export function BpmnCanvas({
   const { data: settings = [] } = useSettings(['bpmn_diagram']);
   const updateSettings = useUpdateSetting();
 
-  const savedDiagramXml = (settings.find(s => s.key === 'bpmn_diagram')?.value as { xml: string })?.xml;
+  const savedDiagramData = settings.find(s => s.key === 'bpmn_diagram')?.value as { xml: string; viewbox?: any };
+  const savedDiagramXml = savedDiagramData?.xml;
+  const savedViewbox = savedDiagramData?.viewbox;
 
   // Save diagram function
   const saveDiagram = useCallback(async () => {
@@ -69,11 +71,25 @@ export function BpmnCanvas({
 
     try {
       setIsSaving(true);
+
+      // Get current viewport to preserve zoom and position
+      const canvas = modelerRef.current.get('canvas') as any;
+      const viewbox = canvas.viewbox();
+
       const { xml } = await modelerRef.current.saveXML({ format: true });
 
       await updateSettings.mutateAsync([{
         key: 'bpmn_diagram',
-        value: { xml }
+        value: {
+          xml,
+          viewbox: {
+            x: viewbox.x,
+            y: viewbox.y,
+            width: viewbox.width,
+            height: viewbox.height,
+            scale: viewbox.scale
+          }
+        }
       }]);
 
       setHasUnsavedChanges(false);
@@ -110,7 +126,19 @@ export function BpmnCanvas({
 
     modeler.importXML(bpmnXml).then(() => {
       const canvas = modeler.get('canvas') as any;
-      canvas.zoom('fit-viewport');
+
+      // Restore saved viewport if available
+      if (savedViewbox) {
+        canvas.viewbox({
+          x: savedViewbox.x,
+          y: savedViewbox.y,
+          width: savedViewbox.width,
+          height: savedViewbox.height
+        });
+        canvas.zoom(savedViewbox.scale || 1);
+      } else {
+        canvas.zoom('fit-viewport');
+      }
     }).catch((err: Error) => {
       console.error('Error importing BPMN diagram:', err);
       setError('Failed to load process diagram');
@@ -149,7 +177,7 @@ export function BpmnCanvas({
     return () => {
       modeler.destroy();
     };
-  }, [savedDiagramXml, processes, userRole]);
+  }, [savedDiagramXml, savedViewbox, processes, userRole]);
 
   // Apply highlighting when filters change
   useEffect(() => {
@@ -171,14 +199,15 @@ export function BpmnCanvas({
         canvas.removeMarker(element, 'highlight-control');
         canvas.removeMarker(element, 'highlight-critical');
 
-        // Explicitly restore original styling by updating colors to default
+        // Explicitly restore original styling by removing inline styles
         const gfx = elementRegistry.getGraphics(element);
         if (gfx) {
           const visual = gfx.querySelector('.djs-visual > :first-child');
           if (visual) {
-            visual.style.fill = '';
-            visual.style.stroke = '';
-            visual.style.strokeWidth = '';
+            // Remove inline styles to allow CSS defaults to take over
+            visual.style.removeProperty('fill');
+            visual.style.removeProperty('stroke');
+            visual.style.removeProperty('stroke-width');
           }
         }
       }
@@ -475,6 +504,12 @@ export function BpmnCanvas({
             stroke: #cbd5e1 !important;
           }
 
+          /* Dark mode: Tasks and Groups should have transparent/light fill by default */
+          .dark [data-element-id] .djs-visual > rect,
+          .dark [data-element-id] .djs-visual > polygon {
+            fill: transparent !important;
+          }
+
           /* Dark mode: Make connection lines visible */
           .dark .djs-connection .djs-visual > path {
             stroke: #94a3b8 !important;
@@ -505,11 +540,10 @@ export function BpmnCanvas({
             display: none !important;
           }
 
-          /* Hide event elements and sub-tasks from palette/context pad if they somehow appear */
+          /* Hide event elements from palette/context pad if they somehow appear */
           .bpmn-icon-start-event-none,
           .bpmn-icon-end-event-none,
           .bpmn-icon-intermediate-event-none,
-          .bpmn-icon-task,
           .bpmn-icon-subprocess-expanded {
             display: none !important;
           }
@@ -544,6 +578,21 @@ export function BpmnCanvas({
             display: flex !important;
             flex-direction: column !important;
             width: 100% !important;
+          }
+
+          /* Dark mode: Make palette icons visible */
+          .dark .djs-palette .entry,
+          .dark .djs-palette [class^="bpmn-icon-"],
+          .dark .djs-palette [class*=" bpmn-icon-"] {
+            color: #e2e8f0 !important;
+          }
+
+          .dark .djs-palette .entry:hover {
+            background-color: rgba(255, 255, 255, 0.1) !important;
+          }
+
+          .dark .djs-palette .entry:before {
+            color: #e2e8f0 !important;
           }
         `}</style>
       </div>

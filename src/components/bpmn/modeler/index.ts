@@ -6,10 +6,12 @@
 import CustomPaletteProvider from './CustomPaletteProvider';
 import CustomContextPadProvider from './CustomContextPadProvider';
 
-// Custom Palette Module
+// Custom Palette Module - replaces default palette provider
 export const customPaletteModule = {
   __init__: ['customPaletteProvider'],
-  customPaletteProvider: ['type', CustomPaletteProvider]
+  customPaletteProvider: ['type', CustomPaletteProvider],
+  // Override the default palette provider
+  paletteProvider: ['type', CustomPaletteProvider]
 };
 
 // Custom Context Pad Module

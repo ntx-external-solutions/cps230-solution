@@ -23,7 +23,8 @@ export default class CustomPaletteProvider {
     'lassoTool',
     'handTool',
     'globalConnect',
-    'translate'
+    'translate',
+    'config'
   ];
 
   constructor(
@@ -35,7 +36,7 @@ export default class CustomPaletteProvider {
     handTool: any,
     globalConnect: any,
     translate: any,
-    config?: { userRole?: string }
+    config: any
   ) {
     this.palette = palette;
     this.create = create;

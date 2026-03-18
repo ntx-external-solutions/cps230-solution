@@ -160,7 +160,7 @@ function AuthProviderInner({ children }: { children: React.ReactNode }) {
 
         // Try to create/update user profile
         const result = await azureApi.createUser({
-          entra_id_object_id: azureAdObjectId,
+          azure_ad_object_id: azureAdObjectId,
           email: email,
           full_name: user.name || undefined,
         });
