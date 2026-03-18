@@ -5,14 +5,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useSettings, useUpdateSetting, useSyncProcessManager, useSyncHistory, useLatestSync, useCancelSync } from '@/hooks/useSettings';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { toast } from 'sonner';
 import { Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 
 export default function Settings() {
   const { profile } = useAuth();
+  const { theme, setTheme } = useTheme();
   const { data: settings = [], isLoading } = useSettings(['pm_site_url', 'pm_username', 'pm_password', 'pm_tenant_id', 'dashboard_filters_expanded']);
   const updateSettings = useUpdateSetting();
   const syncPM = useSyncProcessManager();
@@ -361,6 +364,25 @@ export default function Settings() {
                           onCheckedChange={handleToggleDashboardFilters}
                           disabled={isLoading}
                         />
+                      </div>
+                    </div>
+
+                    <div className="border-t pt-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="theme">Theme</Label>
+                        <Select value={theme} onValueChange={setTheme}>
+                          <SelectTrigger id="theme" className="w-full">
+                            <SelectValue placeholder="Select theme" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="light">Light</SelectItem>
+                            <SelectItem value="dark">Dark</SelectItem>
+                            <SelectItem value="system">System</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Choose how the application looks. System matches your device theme.
+                        </p>
                       </div>
                     </div>
 

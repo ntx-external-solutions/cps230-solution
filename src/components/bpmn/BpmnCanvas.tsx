@@ -158,16 +158,29 @@ export function BpmnCanvas({
     const canvas = modelerRef.current.get('canvas') as any;
     const elementRegistry = modelerRef.current.get('elementRegistry') as any;
     const overlays = modelerRef.current.get('overlays') as any;
+    const modeling = modelerRef.current.get('modeling') as any;
 
     // Clear all existing overlays
     overlays.clear();
 
-    // Reset all element styles
+    // Reset all element styles and restore original colors
     elementRegistry.forEach((element: any) => {
       if (element.type === 'bpmn:Task' || element.type === 'bpmn:Group') {
+        // Remove marker classes
         canvas.removeMarker(element, 'highlight-system');
         canvas.removeMarker(element, 'highlight-control');
         canvas.removeMarker(element, 'highlight-critical');
+
+        // Explicitly restore original styling by updating colors to default
+        const gfx = elementRegistry.getGraphics(element);
+        if (gfx) {
+          const visual = gfx.querySelector('.djs-visual > :first-child');
+          if (visual) {
+            visual.style.fill = '';
+            visual.style.stroke = '';
+            visual.style.strokeWidth = '';
+          }
+        }
       }
     });
 
@@ -480,6 +493,47 @@ export function BpmnCanvas({
           /* Hide BPMN.io logo/reference */
           .bjs-powered-by {
             display: none !important;
+          }
+
+          /* Hide event elements and sub-tasks from palette/context pad if they somehow appear */
+          .bpmn-icon-start-event-none,
+          .bpmn-icon-end-event-none,
+          .bpmn-icon-intermediate-event-none,
+          .bpmn-icon-task,
+          .bpmn-icon-subprocess-expanded {
+            display: none !important;
+          }
+
+          /* Convert palette to single column layout (tall, narrow) */
+          .djs-palette {
+            width: 60px !important;
+          }
+
+          .djs-palette-entries {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            column-gap: 0 !important;
+          }
+
+          .djs-palette-entry {
+            width: 46px !important;
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+          }
+
+          .djs-palette .separator {
+            width: 100% !important;
+            height: 1px !important;
+            margin: 4px 0 !important;
+          }
+
+          /* Adjust palette group spacing */
+          .djs-palette .group {
+            display: flex !important;
+            flex-direction: column !important;
+            width: 100% !important;
           }
         `}</style>
       </div>

@@ -19,18 +19,20 @@
 - [x] 7. Fix: Dashboard filters setting not being respected on Dashboard
 - [x] 8. Remove: Email Domain field from General tab
 - [x] 9. Remove: Account ID field from General tab
-- [ ] 10. Feature: Add dark mode theme support
+- [x] 10. Feature: Add dark mode theme support
 
 ## Dashboard Canvas
 
-- [ ] 11. Fix: Filter unselection not restoring original element color
+- [x] 11. Fix: Filter unselection not restoring original element color
 - [x] 12. UI: Move Element Styling section to bottom of task config
 - [x] 13. UI: Make Element Styling section collapsible and collapsed by default
-- [ ] 14. UI: Clean up styling of configuration panel (label/value alignment)
-- [ ] 15. Hide: Event elements from element selector (start/end/intermediate events)
-- [ ] 16. Hide: Expanded sub-task element from element selector
-- [ ] 17. UI: Convert element selector to single column (tall, narrow layout)
+- [x] 14. UI: Clean up styling of configuration panel (label/value alignment)
+- [x] 15. Hide: Event elements from element selector (start/end/intermediate events)
+- [x] 16. Hide: Expanded sub-task element from element selector
+- [x] 17. UI: Convert element selector to single column (tall, narrow layout)
 
 ---
 
-**Progress:** 0/17 items completed
+**Progress:** 17/17 items completed ✅
+
+**Status:** COMPLETE - Ready for testing

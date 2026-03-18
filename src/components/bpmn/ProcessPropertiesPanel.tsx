@@ -221,43 +221,45 @@ export function ProcessPropertiesPanel({
               </div>
 
               {/* Process Unique ID */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Process Unique ID</Label>
-                <p className="text-xs font-mono break-all bg-muted p-2 rounded">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground">Process Unique ID</Label>
+                <p className="text-xs font-mono break-all bg-muted/50 p-2 rounded border">
                   {selectedProcess.process_unique_id}
                 </p>
               </div>
 
               {/* Owner */}
               {selectedProcess.owner_username && (
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Owner</Label>
-                  <p className="text-sm">{selectedProcess.owner_username}</p>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Owner</Label>
+                  <p className="text-sm text-foreground">{selectedProcess.owner_username}</p>
                 </div>
               )}
 
               {/* Expert */}
               {selectedProcess.process_expert && (
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Process Expert</Label>
-                  <p className="text-sm">{selectedProcess.process_expert}</p>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Process Expert</Label>
+                  <p className="text-sm text-foreground">{selectedProcess.process_expert}</p>
                 </div>
               )}
 
               {/* Status */}
               {selectedProcess.process_status && (
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Status</Label>
-                  <Badge
-                    variant={
-                      selectedProcess.process_status.toLowerCase().includes('publish') ? 'default' :
-                      selectedProcess.process_status.toLowerCase().includes('draft') ? 'secondary' :
-                      selectedProcess.process_status.toLowerCase().includes('archive') ? 'outline' : 'secondary'
-                    }
-                    className="text-xs"
-                  >
-                    {selectedProcess.process_status}
-                  </Badge>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">Status</Label>
+                  <div>
+                    <Badge
+                      variant={
+                        selectedProcess.process_status.toLowerCase().includes('publish') ? 'default' :
+                        selectedProcess.process_status.toLowerCase().includes('draft') ? 'secondary' :
+                        selectedProcess.process_status.toLowerCase().includes('archive') ? 'outline' : 'secondary'
+                      }
+                      className="text-xs"
+                    >
+                      {selectedProcess.process_status}
+                    </Badge>
+                  </div>
                 </div>
               )}
 
