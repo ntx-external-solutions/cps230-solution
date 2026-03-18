@@ -422,15 +422,38 @@ async function handleSync(
         const processOwner = processJson.Owner || null;    // It's a string, not an object
         const processStatus = processJson.State || null;
 
-        // Extract tags from activities
+        // Extract tags and system tags from activities
         const tagSet = new Set<string>();
+        const systemTagsMap = new Map<string, { id: string; name: string }>();
         const regionSet = new Set<string>();
         const activities = processJson.ProcessProcedures?.Activity || [];
+
         for (const activity of activities) {
           const activityTags = activity.Ownerships?.Tag || [];
           for (const tag of activityTags) {
             if (tag.Name) {
               tagSet.add(tag.Name);
+            }
+            // Extract system tags (tags with TagFamilyName === 'System')
+            if (tag.TagFamilyName === 'System' && tag.Id && tag.Name) {
+              systemTagsMap.set(tag.Id.toString(), {
+                id: tag.Id.toString(),
+                name: tag.Name
+              });
+            }
+          }
+
+          // Also check tasks within activities for system tags
+          const tasks = activity.ChildProcessProcedures?.Task || [];
+          for (const task of tasks) {
+            const taskTags = task.Ownerships?.Tag || [];
+            for (const tag of taskTags) {
+              if (tag.TagFamilyName === 'System' && tag.Id && tag.Name) {
+                systemTagsMap.set(tag.Id.toString(), {
+                  id: tag.Id.toString(),
+                  name: tag.Name
+                });
+              }
             }
           }
 
@@ -440,7 +463,8 @@ async function handleSync(
             if (role.Name) {
               // Look for pattern like "Team - UK" or "Team Name - AU"
               // Extract text after the last " - "
-              const match = role.Name.match(/\s-\s([A-Z]{2,10})$/i);
+              // Region codes are typically 2-3 letters (ISO country codes)
+              const match = role.Name.match(/\s-\s([A-Z]{2,3})$/i);
               if (match) {
                 const regionCode = match[1].toUpperCase();
                 regionSet.add(regionCode);
@@ -448,7 +472,9 @@ async function handleSync(
             }
           }
         }
+
         const tagArray = Array.from(tagSet);
+        const systemTags = Array.from(systemTagsMap.values());
         const regionCodes = Array.from(regionSet);
 
         // Check if #CPS230 tag exists
@@ -467,6 +493,38 @@ async function handleSync(
             );
           } catch (regionError) {
             context.warn(`Failed to insert region ${regionCode}:`, regionError);
+          }
+        }
+
+        // Insert/update discovered systems from System tags
+        for (const systemTag of systemTags) {
+          try {
+            // Check if system already exists by pm_tag_id
+            const existingSystem = await client.query(
+              `SELECT id FROM systems WHERE pm_tag_id = $1 AND account_id = $2`,
+              [systemTag.id, userProfile.account_id]
+            );
+
+            if (existingSystem.rows.length > 0) {
+              // Update existing system
+              await client.query(
+                `UPDATE systems
+                 SET system_name = $1, system_id = $2, modified_by = $3, modified_date = NOW()
+                 WHERE pm_tag_id = $4 AND account_id = $5`,
+                [systemTag.name, systemTag.id, userProfile.email, systemTag.id, userProfile.account_id]
+              );
+            } else {
+              // Insert new system
+              await client.query(
+                `INSERT INTO systems (system_name, system_id, pm_tag_id, modified_by, account_id)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (system_id, account_id) DO UPDATE
+                 SET system_name = EXCLUDED.system_name, modified_by = EXCLUDED.modified_by, modified_date = NOW()`,
+                [systemTag.name, systemTag.id, systemTag.id, userProfile.email, userProfile.account_id]
+              );
+            }
+          } catch (systemError) {
+            context.warn(`Failed to upsert system ${systemTag.name}:`, systemError);
           }
         }
 

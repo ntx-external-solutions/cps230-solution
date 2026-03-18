@@ -103,15 +103,9 @@ async function handleGet(
       };
     }
 
-    // Get single critical operation with related data
+    // Get single critical operation
     const criticalOpResult = await query(
-      `SELECT co.*,
-              s.system_name,
-              p.process_name
-       FROM critical_operations co
-       LEFT JOIN systems s ON co.system_id = s.id
-       LEFT JOIN processes p ON co.process_id = p.id
-       WHERE co.id = $1`,
+      'SELECT * FROM critical_operations WHERE id = $1',
       [id]
     );
 
@@ -125,6 +119,24 @@ async function handleGet(
 
     const criticalOp = criticalOpResult.rows[0];
 
+    // Get associated processes
+    const processesResult = await query(
+      `SELECT p.id, p.process_name
+       FROM processes p
+       INNER JOIN critical_operation_processes cop ON cop.process_id = p.id
+       WHERE cop.critical_operation_id = $1`,
+      [id]
+    );
+
+    // Get associated systems
+    const systemsResult = await query(
+      `SELECT s.id, s.system_name
+       FROM systems s
+       INNER JOIN critical_operation_systems cos ON cos.system_id = s.id
+       WHERE cos.critical_operation_id = $1`,
+      [id]
+    );
+
     // Get associated controls
     const controlsResult = await query(
       'SELECT id, control_name, control_type FROM controls WHERE critical_operation_id = $1',
@@ -137,6 +149,8 @@ async function handleGet(
       jsonBody: {
         data: {
           ...criticalOp,
+          processes: processesResult.rows,
+          systems: systemsResult.rows,
           controls: controlsResult.rows,
         },
       },
@@ -144,19 +158,44 @@ async function handleGet(
   } else {
     // Get all critical operations
     const criticalOpsResult = await query(
-      `SELECT co.*,
-              s.system_name,
-              p.process_name
-       FROM critical_operations co
-       LEFT JOIN systems s ON co.system_id = s.id
-       LEFT JOIN processes p ON co.process_id = p.id
-       ORDER BY co.operation_name ASC`
+      'SELECT * FROM critical_operations ORDER BY operation_name ASC'
+    );
+
+    // For each critical operation, get related processes and systems
+    const criticalOpsWithRelations = await Promise.all(
+      criticalOpsResult.rows.map(async (co) => {
+        const processesResult = await query(
+          `SELECT p.id, p.process_name
+           FROM processes p
+           INNER JOIN critical_operation_processes cop ON cop.process_id = p.id
+           WHERE cop.critical_operation_id = $1`,
+          [co.id]
+        );
+
+        const systemsResult = await query(
+          `SELECT s.id, s.system_name
+           FROM systems s
+           INNER JOIN critical_operation_systems cos ON cos.system_id = s.id
+           WHERE cos.critical_operation_id = $1`,
+          [co.id]
+        );
+
+        // For the table display, also add flat process_name and system_name for backwards compatibility
+        // Use the first related item if available
+        return {
+          ...co,
+          processes: processesResult.rows,
+          systems: systemsResult.rows,
+          process_name: processesResult.rows.length > 0 ? processesResult.rows[0].process_name : null,
+          system_name: systemsResult.rows.length > 0 ? systemsResult.rows[0].system_name : null,
+        };
+      })
     );
 
     return {
       status: 200,
       headers: corsHeaders,
-      jsonBody: { data: criticalOpsResult.rows },
+      jsonBody: { data: criticalOpsWithRelations },
     };
   }
 }

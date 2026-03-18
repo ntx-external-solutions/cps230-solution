@@ -249,6 +249,38 @@ export const azureApi = {
     }),
   },
 
+  // Critical Operation Processes (junction table)
+  criticalOperationProcesses: {
+    list: (criticalOperationId?: string) => {
+      const query = criticalOperationId ? `?critical_operation_id=${criticalOperationId}` : '';
+      return apiCall<any[]>(`critical-operation-processes${query}`);
+    },
+    get: (id: string) => apiCall<any>(`critical-operation-processes?id=${id}`),
+    create: (data: any) => apiCall<any>('critical-operation-processes', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    delete: (id: string) => apiCall<any>(`critical-operation-processes?id=${id}`, {
+      method: 'DELETE',
+    }),
+  },
+
+  // Critical Operation Systems (junction table)
+  criticalOperationSystems: {
+    list: (criticalOperationId?: string) => {
+      const query = criticalOperationId ? `?critical_operation_id=${criticalOperationId}` : '';
+      return apiCall<any[]>(`critical-operation-systems${query}`);
+    },
+    get: (id: string) => apiCall<any>(`critical-operation-systems?id=${id}`),
+    create: (data: any) => apiCall<any>('critical-operation-systems', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    delete: (id: string) => apiCall<any>(`critical-operation-systems?id=${id}`, {
+      method: 'DELETE',
+    }),
+  },
+
   // Sync History
   syncHistory: {
     list: (limit?: number, status?: string) => {

@@ -192,8 +192,8 @@ async function handlePost(
   const result = await query(
     `INSERT INTO controls (
       control_name, description, critical_operation_id, process_id,
-      system_id, regions, control_type, pm_control_id, modified_by
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      system_id, regions, control_type, color_code, pm_control_id, modified_by
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING *`,
     [
       validatedData.control_name,
@@ -203,6 +203,7 @@ async function handlePost(
       validatedData.system_id || null,
       validatedData.regions || [],
       validatedData.control_type || null,
+      validatedData.color_code || null,
       validatedData.pm_control_id || null,
       userProfile.email,
     ]
@@ -262,10 +263,11 @@ async function handleUpdate(
       system_id = COALESCE($5, system_id),
       regions = COALESCE($6, regions),
       control_type = COALESCE($7, control_type),
-      pm_control_id = COALESCE($8, pm_control_id),
-      modified_by = $9,
+      color_code = COALESCE($8, color_code),
+      pm_control_id = COALESCE($9, pm_control_id),
+      modified_by = $10,
       modified_date = NOW()
-    WHERE id = $10
+    WHERE id = $11
     RETURNING *`,
     [
       validatedData.control_name,
@@ -275,6 +277,7 @@ async function handleUpdate(
       validatedData.system_id,
       validatedData.regions,
       validatedData.control_type,
+      validatedData.color_code,
       validatedData.pm_control_id,
       userProfile.email,
       id,

@@ -37,6 +37,7 @@ interface FiltersTopBarProps {
   experts: string[];
   selectedFilters: FilterState;
   onFilterChange: (filters: FilterState) => void;
+  defaultExpanded?: boolean;
 }
 
 export function FiltersTopBar({
@@ -48,8 +49,9 @@ export function FiltersTopBar({
   experts,
   selectedFilters,
   onFilterChange,
+  defaultExpanded = true,
 }: FiltersTopBarProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [searchQuery, setSearchQuery] = useState('');
 
   const handleSystemToggle = (systemId: string) => {

@@ -41,6 +41,7 @@ interface ControlFormData {
   process_id: string;
   system_id: string;
   regions: string[];
+  color_code: string;
 }
 
 const AVAILABLE_REGIONS = ['AU', 'UK', 'US', 'NZ', 'SG'];
@@ -69,8 +70,11 @@ export function ControlDialog({ open, onOpenChange, control }: ControlDialogProp
       process_id: '',
       system_id: '',
       regions: [],
+      color_code: '',
     },
   });
+
+  const colorCode = watch('color_code');
 
   useEffect(() => {
     if (open && control) {
@@ -82,6 +86,7 @@ export function ControlDialog({ open, onOpenChange, control }: ControlDialogProp
         process_id: control.process_id || '',
         system_id: control.system_id || '',
         regions: control.regions || [],
+        color_code: (control as any).color_code || '',
       });
     } else if (open) {
       reset({
@@ -92,6 +97,7 @@ export function ControlDialog({ open, onOpenChange, control }: ControlDialogProp
         process_id: '',
         system_id: '',
         regions: [],
+        color_code: '',
       });
     }
   }, [open, control, reset]);
@@ -108,6 +114,7 @@ export function ControlDialog({ open, onOpenChange, control }: ControlDialogProp
           process_id: data.process_id || null,
           system_id: data.system_id || null,
           regions: data.regions.length > 0 ? data.regions : null,
+          color_code: data.color_code || null,
         });
         toast.success('Control updated successfully');
       } else {
@@ -119,6 +126,7 @@ export function ControlDialog({ open, onOpenChange, control }: ControlDialogProp
           process_id: data.process_id || null,
           system_id: data.system_id || null,
           regions: data.regions.length > 0 ? data.regions : null,
+          color_code: data.color_code || null,
         });
         toast.success('Control created successfully');
       }
@@ -184,6 +192,25 @@ export function ControlDialog({ open, onOpenChange, control }: ControlDialogProp
                 {...register('control_type')}
                 placeholder="e.g., Preventive, Detective, Corrective"
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="color_code">Color Code</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="color_code"
+                  type="color"
+                  value={colorCode || '#000000'}
+                  onChange={(e) => setValue('color_code', e.target.value)}
+                  className="w-20 h-10 p-1 cursor-pointer"
+                />
+                <Input
+                  value={colorCode || ''}
+                  onChange={(e) => setValue('color_code', e.target.value)}
+                  placeholder="#FF6633"
+                  className="flex-1"
+                />
+              </div>
             </div>
 
             <div className="grid gap-2">

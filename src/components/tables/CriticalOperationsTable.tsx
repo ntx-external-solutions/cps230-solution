@@ -100,11 +100,11 @@ export function CriticalOperationsTable() {
       id: 'system',
       header: 'System',
       cell: ({ row }) => {
-        const system = (row.original as any).system;
+        const systemName = (row.original as any).system_name;
         return (
           <div className="text-sm">
-            {system?.system_name ? (
-              <Badge variant="outline">{system.system_name}</Badge>
+            {systemName ? (
+              <Badge variant="outline">{systemName}</Badge>
             ) : (
               <span className="text-muted-foreground">—</span>
             )}
@@ -116,11 +116,11 @@ export function CriticalOperationsTable() {
       id: 'process',
       header: 'Process',
       cell: ({ row }) => {
-        const process = (row.original as any).process;
+        const processName = (row.original as any).process_name;
         return (
           <div className="text-sm">
-            {process?.process_name ? (
-              <Badge variant="outline">{process.process_name}</Badge>
+            {processName ? (
+              <Badge variant="outline">{processName}</Badge>
             ) : (
               <span className="text-muted-foreground">—</span>
             )}

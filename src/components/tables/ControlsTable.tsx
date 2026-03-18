@@ -69,9 +69,20 @@ export function ControlsTable() {
     {
       accessorKey: 'control_name',
       header: 'Control Name',
-      cell: ({ row }) => (
-        <div className="font-medium">{row.getValue('control_name')}</div>
-      ),
+      cell: ({ row }) => {
+        const colorCode = (row.original as any).color_code;
+        return (
+          <div className="flex items-center gap-2">
+            {colorCode && (
+              <div
+                className="w-3 h-3 rounded-full border"
+                style={{ backgroundColor: colorCode }}
+              />
+            )}
+            <span className="font-medium">{row.getValue('control_name')}</span>
+          </div>
+        );
+      },
     },
     {
       accessorKey: 'control_type',

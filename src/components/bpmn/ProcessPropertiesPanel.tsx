@@ -92,7 +92,8 @@ export function ProcessPropertiesPanel({
     inputs: false,
     outputs: false,
     triggers: false,
-    targets: false
+    targets: false,
+    elementStyling: false
   });
 
   // Get current styling properties from element
@@ -162,54 +163,6 @@ export function ProcessPropertiesPanel({
         </CardHeader>
 
         <CardContent className="space-y-4">
-          {/* Element Styling Controls - only for editors */}
-          {!readOnly && (
-            <div className="space-y-3 pb-3 border-b">
-              <h4 className="text-sm font-semibold">Element Styling</h4>
-
-              {/* Font Size Control */}
-              <div className="space-y-2">
-                <Label htmlFor="fontSize" className="text-xs">Font Size</Label>
-                <Select
-                  value={currentFontSize.toString()}
-                  onValueChange={(value) => onFontSizeChange?.(parseInt(value))}
-                >
-                  <SelectTrigger id="fontSize" className="text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="10">10px</SelectItem>
-                    <SelectItem value="12">12px (Default)</SelectItem>
-                    <SelectItem value="14">14px</SelectItem>
-                    <SelectItem value="16">16px</SelectItem>
-                    <SelectItem value="18">18px</SelectItem>
-                    <SelectItem value="20">20px</SelectItem>
-                    <SelectItem value="24">24px</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Border Style Control - only for Group elements */}
-              {isGroupElement && (
-                <div className="space-y-2">
-                  <Label htmlFor="borderStyle" className="text-xs">Border Style</Label>
-                  <Select
-                    value={currentBorderStyle}
-                    onValueChange={(value) => onBorderStyleChange?.(value as 'dashed' | 'solid')}
-                  >
-                    <SelectTrigger id="borderStyle" className="text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="dashed">Dashed (Default)</SelectItem>
-                      <SelectItem value="solid">Solid</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Process Selector - only for editors */}
           {!readOnly && (
             <div className="space-y-2">
@@ -558,6 +511,64 @@ export function ProcessPropertiesPanel({
                           <div><span className="font-semibold">Target:</span> {target.Target}</div>
                         </div>
                       ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+
+              {/* Element Styling Controls - only for editors */}
+              {!readOnly && (
+                <Collapsible open={openSections.elementStyling} onOpenChange={() => toggleSection('elementStyling')}>
+                  <CollapsibleTrigger className="flex items-center justify-between w-full hover:bg-muted/50 p-2 rounded -mx-2">
+                    <Label className="text-xs text-muted-foreground cursor-pointer">Element Styling</Label>
+                    {openSections.elementStyling ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-2">
+                    <div className="space-y-3">
+                      {/* Font Size Control */}
+                      <div className="space-y-2">
+                        <Label htmlFor="fontSize" className="text-xs">Font Size</Label>
+                        <Select
+                          value={currentFontSize.toString()}
+                          onValueChange={(value) => onFontSizeChange?.(parseInt(value))}
+                        >
+                          <SelectTrigger id="fontSize" className="text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="10">10px</SelectItem>
+                            <SelectItem value="12">12px (Default)</SelectItem>
+                            <SelectItem value="14">14px</SelectItem>
+                            <SelectItem value="16">16px</SelectItem>
+                            <SelectItem value="18">18px</SelectItem>
+                            <SelectItem value="20">20px</SelectItem>
+                            <SelectItem value="24">24px</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Border Style Control - only for Group elements */}
+                      {isGroupElement && (
+                        <div className="space-y-2">
+                          <Label htmlFor="borderStyle" className="text-xs">Border Style</Label>
+                          <Select
+                            value={currentBorderStyle}
+                            onValueChange={(value) => onBorderStyleChange?.(value as 'dashed' | 'solid')}
+                          >
+                            <SelectTrigger id="borderStyle" className="text-sm">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="dashed">Dashed (Default)</SelectItem>
+                              <SelectItem value="solid">Solid</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
                     </div>
                   </CollapsibleContent>
                 </Collapsible>

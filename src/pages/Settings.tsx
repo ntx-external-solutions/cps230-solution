@@ -31,8 +31,6 @@ export default function Settings() {
 
   // General settings
   const [accountName, setAccountName] = useState('');
-  const [accountDomain, setAccountDomain] = useState('');
-  const [accountId, setAccountId] = useState('');
   const [isLoadingAccount, setIsLoadingAccount] = useState(true);
   const [dashboardFiltersExpanded, setDashboardFiltersExpanded] = useState(false);
 
@@ -346,33 +344,6 @@ export default function Settings() {
                       />
                       <p className="text-xs text-muted-foreground">
                         The name of your organization
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="account-domain">Email Domain</Label>
-                      <Input
-                        id="account-domain"
-                        type="text"
-                        value={accountDomain}
-                        disabled
-                        className="bg-muted"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        All users with this email domain belong to this account (cannot be changed)
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Account ID</Label>
-                      <Input
-                        type="text"
-                        value={accountId}
-                        disabled
-                        className="bg-muted font-mono text-sm"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Unique identifier for this account
                       </p>
                     </div>
 

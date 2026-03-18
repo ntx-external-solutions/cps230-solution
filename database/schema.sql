@@ -98,6 +98,30 @@ CREATE TABLE IF NOT EXISTS public.critical_operations (
 );
 
 -- =====================================================
+-- Critical Operation Processes Junction Table
+-- Many-to-many relationship between critical operations and processes
+-- =====================================================
+CREATE TABLE IF NOT EXISTS public.critical_operation_processes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    critical_operation_id UUID NOT NULL REFERENCES public.critical_operations(id) ON DELETE CASCADE,
+    process_id UUID NOT NULL REFERENCES public.processes(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    UNIQUE(critical_operation_id, process_id)
+);
+
+-- =====================================================
+-- Critical Operation Systems Junction Table
+-- Many-to-many relationship between critical operations and systems
+-- =====================================================
+CREATE TABLE IF NOT EXISTS public.critical_operation_systems (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    critical_operation_id UUID NOT NULL REFERENCES public.critical_operations(id) ON DELETE CASCADE,
+    system_id UUID NOT NULL REFERENCES public.systems(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    UNIQUE(critical_operation_id, system_id)
+);
+
+-- =====================================================
 -- Controls Table
 -- Defines controls that manage/govern critical operations
 -- =====================================================
@@ -110,6 +134,7 @@ CREATE TABLE IF NOT EXISTS public.controls (
     system_id UUID REFERENCES public.systems(id) ON DELETE SET NULL,
     regions TEXT[], -- Multi-select: ['AU', 'UK', 'US', etc.]
     control_type TEXT, -- Type of control
+    color_code TEXT, -- For visual identification in the ecosystem
     pm_control_id TEXT, -- Process Manager control ID for sync
     modified_by TEXT NOT NULL,
     modified_date TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,

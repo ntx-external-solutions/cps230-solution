@@ -55,8 +55,11 @@ export default function Dashboard() {
     experts: []
   });
 
-  // Fetch regions from settings
-  const { data: settings = [] } = useSettings(['regions']);
+  // Fetch settings
+  const { data: settings = [] } = useSettings(['regions', 'dashboard_filters_expanded']);
+
+  // Extract values from settings
+  const dashboardFiltersExpanded = settings.find(s => s.key === 'dashboard_filters_expanded')?.value as boolean ?? true;
 
   // Fetch all systems
   const { data: systems, isLoading: systemsLoading } = useQuery({
@@ -126,6 +129,7 @@ export default function Dashboard() {
               experts={experts}
               selectedFilters={filters}
               onFilterChange={setFilters}
+              defaultExpanded={dashboardFiltersExpanded}
             />
 
             {/* BPMN Canvas */}
