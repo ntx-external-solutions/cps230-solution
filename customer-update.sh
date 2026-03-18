@@ -199,6 +199,27 @@ cd ..
 # Update frontend
 print_section "Updating Frontend"
 
+# Get Azure AD configuration from Function App
+print_info "Retrieving Azure AD configuration..."
+AZURE_CONFIG=$(az functionapp config appsettings list \
+    --name "$FUNCTION_APP_NAME" \
+    --resource-group "$RESOURCE_GROUP" \
+    --query "[?name=='AZURE_TENANT_ID' || name=='AZURE_CLIENT_ID' || name=='STATIC_WEB_APP_URL'].{name:name, value:value}" \
+    --output json)
+
+AZURE_TENANT_ID=$(echo $AZURE_CONFIG | jq -r '.[] | select(.name=="AZURE_TENANT_ID") | .value')
+AZURE_CLIENT_ID=$(echo $AZURE_CONFIG | jq -r '.[] | select(.name=="AZURE_CLIENT_ID") | .value')
+STATIC_WEB_APP_URL=$(echo $AZURE_CONFIG | jq -r '.[] | select(.name=="STATIC_WEB_APP_URL") | .value')
+
+# Create production environment configuration
+print_info "Creating production environment configuration..."
+cat > .env.production << EOF
+VITE_API_URL=https://${FUNCTION_APP_NAME}.azurewebsites.net/api
+VITE_AZURE_TENANT_ID=$AZURE_TENANT_ID
+VITE_AZURE_CLIENT_ID=$AZURE_CLIENT_ID
+VITE_REDIRECT_URI=$STATIC_WEB_APP_URL
+EOF
+
 print_info "Installing frontend dependencies..."
 npm install --legacy-peer-deps
 
