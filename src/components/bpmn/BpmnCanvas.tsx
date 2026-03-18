@@ -470,6 +470,16 @@ export function BpmnCanvas({
 
         {/* Add custom CSS for highlighting and styling */}
         <style>{`
+          /* Dark mode: Make all BPMN element borders light colored for visibility */
+          .dark .djs-visual > :first-child {
+            stroke: #cbd5e1 !important;
+          }
+
+          /* Dark mode: Make connection lines visible */
+          .dark .djs-connection .djs-visual > path {
+            stroke: #94a3b8 !important;
+          }
+
           .highlight-control .djs-visual > :nth-child(1) {
             stroke: #3b82f6 !important;
             stroke-width: 4 !important;

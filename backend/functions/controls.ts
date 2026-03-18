@@ -103,17 +103,9 @@ async function handleGet(
       };
     }
 
-    // Get single control with related data
+    // Get single control
     const controlResult = await query(
-      `SELECT c.*,
-              co.operation_name as critical_operation_name,
-              p.process_name,
-              s.system_name
-       FROM controls c
-       LEFT JOIN critical_operations co ON c.critical_operation_id = co.id
-       LEFT JOIN processes p ON c.process_id = p.id
-       LEFT JOIN systems s ON c.system_id = s.id
-       WHERE c.id = $1`,
+      'SELECT * FROM controls WHERE id = $1',
       [id]
     );
 
@@ -127,8 +119,35 @@ async function handleGet(
 
     const control = controlResult.rows[0];
 
-    // Get associated processes via process_controls junction table
+    // Get associated critical operations
+    const criticalOpsResult = await query(
+      `SELECT co.id, co.operation_name
+       FROM critical_operations co
+       INNER JOIN control_critical_operations cco ON cco.critical_operation_id = co.id
+       WHERE cco.control_id = $1`,
+      [id]
+    );
+
+    // Get associated processes
     const processesResult = await query(
+      `SELECT p.id, p.process_name
+       FROM processes p
+       INNER JOIN control_processes cp ON cp.process_id = p.id
+       WHERE cp.control_id = $1`,
+      [id]
+    );
+
+    // Get associated systems
+    const systemsResult = await query(
+      `SELECT s.id, s.system_name
+       FROM systems s
+       INNER JOIN control_systems cs ON cs.system_id = s.id
+       WHERE cs.control_id = $1`,
+      [id]
+    );
+
+    // Get associated processes via process_controls junction table (for backward compatibility)
+    const associatedProcessesResult = await query(
       `SELECT p.id, p.process_name, pc.process_step, pc.activity_description
        FROM processes p
        INNER JOIN process_controls pc ON pc.process_id = p.id
@@ -142,28 +161,63 @@ async function handleGet(
       jsonBody: {
         data: {
           ...control,
-          associatedProcesses: processesResult.rows,
+          critical_operations: criticalOpsResult.rows,
+          processes: processesResult.rows,
+          systems: systemsResult.rows,
+          associatedProcesses: associatedProcessesResult.rows,
         },
       },
     };
   } else {
     // Get all controls
     const controlsResult = await query(
-      `SELECT c.*,
-              co.operation_name as critical_operation_name,
-              p.process_name,
-              s.system_name
-       FROM controls c
-       LEFT JOIN critical_operations co ON c.critical_operation_id = co.id
-       LEFT JOIN processes p ON c.process_id = p.id
-       LEFT JOIN systems s ON c.system_id = s.id
-       ORDER BY c.control_name ASC`
+      'SELECT * FROM controls ORDER BY control_name ASC'
+    );
+
+    // For each control, get related critical operations, processes, and systems
+    const controlsWithRelations = await Promise.all(
+      controlsResult.rows.map(async (control) => {
+        const criticalOpsResult = await query(
+          `SELECT co.id, co.operation_name
+           FROM critical_operations co
+           INNER JOIN control_critical_operations cco ON cco.critical_operation_id = co.id
+           WHERE cco.control_id = $1`,
+          [control.id]
+        );
+
+        const processesResult = await query(
+          `SELECT p.id, p.process_name
+           FROM processes p
+           INNER JOIN control_processes cp ON cp.process_id = p.id
+           WHERE cp.control_id = $1`,
+          [control.id]
+        );
+
+        const systemsResult = await query(
+          `SELECT s.id, s.system_name
+           FROM systems s
+           INNER JOIN control_systems cs ON cs.system_id = s.id
+           WHERE cs.control_id = $1`,
+          [control.id]
+        );
+
+        // For backwards compatibility, add flat fields using the first related item
+        return {
+          ...control,
+          critical_operations: criticalOpsResult.rows,
+          processes: processesResult.rows,
+          systems: systemsResult.rows,
+          critical_operation_name: criticalOpsResult.rows.length > 0 ? criticalOpsResult.rows[0].operation_name : null,
+          process_name: processesResult.rows.length > 0 ? processesResult.rows[0].process_name : null,
+          system_name: systemsResult.rows.length > 0 ? systemsResult.rows[0].system_name : null,
+        };
+      })
     );
 
     return {
       status: 200,
       headers: corsHeaders,
-      jsonBody: { data: controlsResult.rows },
+      jsonBody: { data: controlsWithRelations },
     };
   }
 }

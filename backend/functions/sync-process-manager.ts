@@ -539,8 +539,8 @@ async function handleSync(
         const triggers = processJson.Triggers?.Trigger || null;
         const targets = processJson.Targets?.Target || null;
 
-        // Upsert process to database
-        await client.query(
+        // Upsert process to database and get the process ID
+        const processResult = await client.query(
           `INSERT INTO processes (
             process_name,
             process_unique_id,
@@ -575,7 +575,7 @@ async function handleSync(
             targets = EXCLUDED.targets,
             modified_by = EXCLUDED.modified_by,
             modified_date = NOW()
-          `,
+          RETURNING id`,
           [
             processName,
             processUniqueId,
@@ -601,6 +601,40 @@ async function handleSync(
             userProfile.email,
           ]
         );
+
+        const processId = processResult.rows[0].id;
+
+        // Link systems to process via process_systems junction table
+        // First, delete existing system links for this process
+        await client.query(
+          `DELETE FROM process_systems WHERE process_id = $1`,
+          [processId]
+        );
+
+        // Then insert new system links
+        for (const systemTag of systemTags) {
+          try {
+            // Get the system ID from the systems table using pm_tag_id
+            const systemResult = await client.query(
+              `SELECT id FROM systems WHERE pm_tag_id = $1 AND account_id = $2`,
+              [systemTag.id, userProfile.account_id]
+            );
+
+            if (systemResult.rows.length > 0) {
+              const systemId = systemResult.rows[0].id;
+
+              // Create the process-system link
+              await client.query(
+                `INSERT INTO process_systems (process_id, system_id, modified_by)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (process_id, system_id) DO NOTHING`,
+                [processId, systemId, userProfile.email]
+              );
+            }
+          } catch (systemLinkError) {
+            context.warn(`Failed to link system ${systemTag.name} to process ${processName}:`, systemLinkError);
+          }
+        }
 
         context.log(`Successfully synced process: ${processData.name}`);
         recordsSynced++;

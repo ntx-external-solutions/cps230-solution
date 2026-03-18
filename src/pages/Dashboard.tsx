@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { FilterState } from '@/components/bpmn/utils/highlightCalculator';
 import { useAuth } from '@/contexts/AuthContext';
-import { systemsApi, processesApi, controlsApi, criticalOperationsApi } from '@/lib/api';
+import { systemsApi, processesApi, controlsApi, criticalOperationsApi, regionsApi } from '@/lib/api';
 import { useSettings } from '@/hooks/useSettings';
 
 interface Process {
@@ -85,9 +85,14 @@ export default function Dashboard() {
     queryFn: () => criticalOperationsApi.getAll(),
   });
 
-  // Get regions from settings instead of extracting from processes
-  const availableRegions = (settings.find(s => s.key === 'regions')?.value as Region[]) || [];
-  const regions = availableRegions.map(r => r.name);
+  // Fetch all regions
+  const { data: regionsData, isLoading: regionsLoading } = useQuery({
+    queryKey: ['regions'],
+    queryFn: () => regionsApi.getAll(),
+  });
+
+  // Extract region codes from regions data
+  const regions = (regionsData || []).map((r: any) => r.region_code);
 
   // Extract unique owners and experts from processes
   const owners = Array.from(
@@ -106,7 +111,7 @@ export default function Dashboard() {
     )
   ).sort();
 
-  const isLoading = systemsLoading || processesLoading || controlsLoading || criticalOpsLoading;
+  const isLoading = systemsLoading || processesLoading || controlsLoading || criticalOpsLoading || regionsLoading;
 
   const userRole = profile?.role || 'user';
 

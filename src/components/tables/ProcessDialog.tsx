@@ -16,7 +16,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import type { Process } from '@/types/database';
 import { useCreateProcess, useUpdateProcess } from '@/hooks/useProcesses';
-import { useSettings } from '@/hooks/useSettings';
+import { useQuery } from '@tanstack/react-query';
+import { regionsApi } from '@/lib/api';
 import { toast } from 'sonner';
 
 interface ProcessDialogProps {
@@ -31,16 +32,13 @@ interface ProcessFormData {
   owner_username: string;
 }
 
-interface Region {
-  name: string;
-  label: string;
-  icon?: string;
-}
-
 export function ProcessDialog({ open, onOpenChange, process }: ProcessDialogProps) {
   const createProcess = useCreateProcess();
   const updateProcess = useUpdateProcess();
-  const { data: settings = [] } = useSettings(['regions']);
+  const { data: regions = [], isLoading: regionsLoading } = useQuery({
+    queryKey: ['regions'],
+    queryFn: () => regionsApi.getAll(),
+  });
 
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
 
@@ -57,8 +55,12 @@ export function ProcessDialog({ open, onOpenChange, process }: ProcessDialogProp
     },
   });
 
-  // Get available regions from settings
-  const availableRegions = (settings.find(s => s.key === 'regions')?.value as Region[]) || [];
+  // Get available regions from database
+  const availableRegions = regions.map((r: any) => ({
+    name: r.region_code,
+    label: r.region_name,
+    icon: r.icon,
+  }));
 
   // Reset form when dialog opens with process data
   useEffect(() => {

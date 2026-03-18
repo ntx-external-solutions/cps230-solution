@@ -281,6 +281,54 @@ export const azureApi = {
     }),
   },
 
+  // Control Critical Operations (junction table)
+  controlCriticalOperations: {
+    list: (controlId?: string) => {
+      const query = controlId ? `?control_id=${controlId}` : '';
+      return apiCall<any[]>(`control-critical-operations${query}`);
+    },
+    get: (id: string) => apiCall<any>(`control-critical-operations?id=${id}`),
+    create: (data: any) => apiCall<any>('control-critical-operations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    delete: (id: string) => apiCall<any>(`control-critical-operations?id=${id}`, {
+      method: 'DELETE',
+    }),
+  },
+
+  // Control Processes (junction table)
+  controlProcesses: {
+    list: (controlId?: string) => {
+      const query = controlId ? `?control_id=${controlId}` : '';
+      return apiCall<any[]>(`control-processes${query}`);
+    },
+    get: (id: string) => apiCall<any>(`control-processes?id=${id}`),
+    create: (data: any) => apiCall<any>('control-processes', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    delete: (id: string) => apiCall<any>(`control-processes?id=${id}`, {
+      method: 'DELETE',
+    }),
+  },
+
+  // Control Systems (junction table)
+  controlSystems: {
+    list: (controlId?: string) => {
+      const query = controlId ? `?control_id=${controlId}` : '';
+      return apiCall<any[]>(`control-systems${query}`);
+    },
+    get: (id: string) => apiCall<any>(`control-systems?id=${id}`),
+    create: (data: any) => apiCall<any>('control-systems', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    delete: (id: string) => apiCall<any>(`control-systems?id=${id}`, {
+      method: 'DELETE',
+    }),
+  },
+
   // Sync History
   syncHistory: {
     list: (limit?: number, status?: string) => {

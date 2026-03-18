@@ -63,9 +63,9 @@ export default class CustomPaletteProvider {
 
     const canEdit = this.userRole === 'promaster' || this.userRole === 'business_analyst';
 
-    function createCallActivity(event: any) {
+    function createTask(event: any) {
       const shape = elementFactory.createShape({
-        type: 'bpmn:CallActivity'
+        type: 'bpmn:Task'
       });
       create.start(event, shape);
     }
@@ -73,6 +73,20 @@ export default class CustomPaletteProvider {
     function createGroup(event: any) {
       const shape = elementFactory.createShape({
         type: 'bpmn:Group'
+      });
+      create.start(event, shape);
+    }
+
+    function createGateway(event: any) {
+      const shape = elementFactory.createShape({
+        type: 'bpmn:ExclusiveGateway'
+      });
+      create.start(event, shape);
+    }
+
+    function createParticipant(event: any) {
+      const shape = elementFactory.createShape({
+        type: 'bpmn:Participant'
       });
       create.start(event, shape);
     }
@@ -135,14 +149,25 @@ export default class CustomPaletteProvider {
         separator: true
       };
 
-      // Call Activity - the main element users can create
-      entries['create.call-activity'] = {
+      // Task - the main element users can create
+      entries['create.task'] = {
         group: 'activity',
-        className: 'bpmn-icon-call-activity',
-        title: translate('Create Call Activity'),
+        className: 'bpmn-icon-task',
+        title: translate('Create Task'),
         action: {
-          dragstart: createCallActivity,
-          click: createCallActivity
+          dragstart: createTask,
+          click: createTask
+        }
+      };
+
+      // Decision (Gateway)
+      entries['create.exclusive-gateway'] = {
+        group: 'activity',
+        className: 'bpmn-icon-gateway-xor',
+        title: translate('Create Decision (Exclusive Gateway)'),
+        action: {
+          dragstart: createGateway,
+          click: createGateway
         }
       };
 
@@ -154,6 +179,17 @@ export default class CustomPaletteProvider {
         action: {
           dragstart: createGroup,
           click: createGroup
+        }
+      };
+
+      // Participant (Swimlane/Pool)
+      entries['create.participant'] = {
+        group: 'activity',
+        className: 'bpmn-icon-participant',
+        title: translate('Create Swimlane/Pool'),
+        action: {
+          dragstart: createParticipant,
+          click: createParticipant
         }
       };
     }
