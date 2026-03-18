@@ -161,7 +161,7 @@ export default function Login() {
 
                 <Button
                   onClick={handleMicrosoftSignIn}
-                  className="w-full bg-nintex-navy hover:bg-nintex-navy/90"
+                  className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
                   disabled={loading}
                 >
                   <svg className="mr-2 h-5 w-5" viewBox="0 0 21 21" fill="currentColor">

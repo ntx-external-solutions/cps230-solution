@@ -235,14 +235,14 @@ export function AppLayout({ children }: AppLayoutProps) {
       {/* Main Content */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Header */}
-        <header className="border-b bg-white px-6 py-4">
+        <header className="border-b bg-white dark:bg-gray-900 px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-semibold text-foreground">
+              <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
                 {filteredNavigation.find((item) => item.href === location.pathname)
                   ?.name || 'CPS230'}
               </h1>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
                 Critical Operations Ecosystem Management
               </p>
             </div>
