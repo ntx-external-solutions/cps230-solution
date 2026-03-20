@@ -47,6 +47,9 @@ jobs:
         run: npm test
         continue-on-error: true
 
+      - name: Copy VERSION file into backend package
+        run: cp VERSION backend/VERSION
+
       - name: Upload backend artifact
         uses: actions/upload-artifact@v4
         with:
@@ -56,6 +59,7 @@ jobs:
             backend/node_modules
             backend/package.json
             backend/host.json
+            backend/VERSION
 
   # Build frontend
   build-frontend:
@@ -170,6 +174,64 @@ jobs:
           app_location: '/'
           output_location: 'dist'
           skip_app_build: true
+
+  # Apply database migrations (runs on every deploy)
+  run-migrations:
+    runs-on: ubuntu-latest
+    needs: deploy-infrastructure
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Create migrations tracking table
+        env:
+          PGPASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          psql -h "${{ secrets.POSTGRES_HOST }}" \
+               -U "${{ secrets.POSTGRES_USER }}" \
+               -d "${{ secrets.POSTGRES_DB }}" \
+               -c "CREATE TABLE IF NOT EXISTS public.schema_migrations (
+                     version VARCHAR(255) PRIMARY KEY,
+                     applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                   );"
+
+      - name: Apply pending migrations
+        env:
+          PGPASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          PGHOST="${{ secrets.POSTGRES_HOST }}"
+          PGUSER="${{ secrets.POSTGRES_USER }}"
+          PGDB="${{ secrets.POSTGRES_DB }}"
+          MIGRATIONS_APPLIED=0
+
+          for migration in database/migrations/*.sql; do
+            if [ -f "$migration" ]; then
+              MIGRATION_NAME=$(basename "$migration" .sql)
+
+              APPLIED=$(psql -h "$PGHOST" -U "$PGUSER" -d "$PGDB" -tAc \
+                "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '$MIGRATION_NAME');")
+
+              if [ "$APPLIED" = "f" ]; then
+                echo "Applying migration: $MIGRATION_NAME"
+                psql -h "$PGHOST" -U "$PGUSER" -d "$PGDB" -f "$migration"
+                psql -h "$PGHOST" -U "$PGUSER" -d "$PGDB" -c \
+                  "INSERT INTO schema_migrations (version) VALUES ('$MIGRATION_NAME');"
+                echo "Migration $MIGRATION_NAME applied successfully"
+                MIGRATIONS_APPLIED=$((MIGRATIONS_APPLIED + 1))
+              else
+                echo "Migration $MIGRATION_NAME already applied (skipping)"
+              fi
+            fi
+          done
+
+          echo "Migrations complete. $MIGRATIONS_APPLIED new migration(s) applied."
 
   # Initialize database (only on first deployment or when schema changes)
   initialize-database:

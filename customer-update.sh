@@ -34,6 +34,14 @@ cd "$SCRIPT_DIR"
 
 print_section "CPS230 Solution - Customer Update"
 
+# Display current version
+if [ -f "VERSION" ]; then
+    CURRENT_VERSION=$(cat VERSION | tr -d '[:space:]')
+    print_info "Current version: $CURRENT_VERSION"
+else
+    print_warning "VERSION file not found"
+fi
+
 # Check if deployment-info.txt exists
 if [ ! -f "deployment-info.txt" ]; then
     print_error "deployment-info.txt not found. This script should be run from a deployed CPS230 instance."
@@ -88,6 +96,52 @@ else
     print_info "If you want automatic updates, initialize this as a git repository:"
     print_info "  git init"
     print_info "  git remote add origin <repository-url>"
+fi
+
+# Display new version after update
+if [ -f "VERSION" ]; then
+    NEW_VERSION=$(cat VERSION | tr -d '[:space:]')
+    if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" != "$NEW_VERSION" ]; then
+        print_info "Upgrading from v${CURRENT_VERSION} to v${NEW_VERSION}"
+        if [ -f "CHANGELOG.md" ]; then
+            print_info "See CHANGELOG.md for details on what changed"
+        fi
+    else
+        print_info "Version: $NEW_VERSION"
+    fi
+fi
+
+# Update infrastructure (optional)
+print_section "Infrastructure Update"
+
+echo "Would you like to update the Azure infrastructure?"
+echo "This is recommended if the new version includes infrastructure changes."
+echo "It is safe to re-run - Bicep deployments are idempotent."
+echo ""
+read -p "Update infrastructure? (yes/no): " UPDATE_INFRA
+if [ "$UPDATE_INFRA" = "yes" ]; then
+    if [ -f "infrastructure/main.bicep" ]; then
+        # Determine environment from resource group name
+        ENVIRONMENT=$(echo "$RESOURCE_GROUP" | sed 's/.*-//')
+
+        print_info "Deploying infrastructure updates (environment: $ENVIRONMENT)..."
+        az deployment sub create \
+            --location australiaeast \
+            --template-file infrastructure/main.bicep \
+            --parameters "infrastructure/parameters/${ENVIRONMENT}.parameters.json" \
+            --parameters environmentName="$ENVIRONMENT"
+
+        if [ $? -eq 0 ]; then
+            print_info "Infrastructure updated successfully"
+        else
+            print_warning "Infrastructure update failed. This may require manual intervention."
+            print_info "You can continue - the code update will still proceed."
+        fi
+    else
+        print_warning "infrastructure/main.bicep not found. Skipping infrastructure update."
+    fi
+else
+    print_info "Skipping infrastructure update"
 fi
 
 # Get database credentials from Azure Function App
@@ -173,6 +227,7 @@ print_section "Updating Backend"
 
 print_info "Installing backend dependencies..."
 cd backend
+cp ../VERSION VERSION 2>/dev/null || true
 npm install
 
 print_info "Building backend..."
@@ -259,13 +314,16 @@ print_section "Update Complete!"
 
 STATIC_WEB_APP_URL=$(grep "Web Application:" deployment-info.txt | cut -d':' -f2- | xargs)
 
-echo "Your CPS230 solution has been updated successfully!"
+FINAL_VERSION=$(cat VERSION 2>/dev/null | tr -d '[:space:]' || echo "unknown")
+echo "Your CPS230 solution has been updated to v${FINAL_VERSION}!"
 echo ""
 echo "🌐 Application URL: $STATIC_WEB_APP_URL"
 echo "🔗 API Endpoint: https://${FUNCTION_APP_NAME}.azurewebsites.net/api"
+echo "📋 Version: $FINAL_VERSION"
 echo ""
 echo "✅ Update Status:"
 echo "  • Code pulled from repository (if git enabled)"
+echo "  • Infrastructure updated (if selected)"
 echo "  • Database migrations applied"
 echo "  • Backend rebuilt and deployed"
 echo "  • Frontend rebuilt and deployed"
