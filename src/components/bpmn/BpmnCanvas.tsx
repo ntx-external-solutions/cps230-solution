@@ -129,13 +129,14 @@ export function BpmnCanvas({
 
       // Restore saved viewport if available
       if (savedViewbox) {
+        // Restore viewbox with scale included
         canvas.viewbox({
           x: savedViewbox.x,
           y: savedViewbox.y,
           width: savedViewbox.width,
-          height: savedViewbox.height
+          height: savedViewbox.height,
+          scale: savedViewbox.scale
         });
-        canvas.zoom(savedViewbox.scale || 1);
       } else {
         canvas.zoom('fit-viewport');
       }
@@ -515,6 +516,16 @@ export function BpmnCanvas({
             stroke: #94a3b8 !important;
           }
 
+          /* Dark mode: Make element labels (text) visible */
+          .dark .djs-visual text {
+            fill: #f1f5f9 !important;
+          }
+
+          /* Dark mode: Gateway labels */
+          .dark .djs-label text {
+            fill: #f1f5f9 !important;
+          }
+
           .highlight-control .djs-visual > :nth-child(1) {
             stroke: #3b82f6 !important;
             stroke-width: 4 !important;
@@ -580,19 +591,40 @@ export function BpmnCanvas({
             width: 100% !important;
           }
 
-          /* Dark mode: Make palette icons visible */
-          .dark .djs-palette .entry,
-          .dark .djs-palette [class^="bpmn-icon-"],
-          .dark .djs-palette [class*=" bpmn-icon-"] {
-            color: #e2e8f0 !important;
+          /* Dark mode: Make palette background visible */
+          .dark .djs-palette {
+            background-color: #ffffff !important;
           }
 
-          .dark .djs-palette .entry:hover {
-            background-color: rgba(255, 255, 255, 0.1) !important;
+          /* Dark mode: Make palette icons visible with dark icons on white background */
+          .dark .djs-palette .entry {
+            color: #1f2937 !important;
           }
 
           .dark .djs-palette .entry:before {
-            color: #e2e8f0 !important;
+            color: #1f2937 !important;
+          }
+
+          .dark .djs-palette .entry:hover {
+            background-color: #f3f4f6 !important;
+          }
+
+          .dark .djs-palette .separator {
+            background-color: #e5e7eb !important;
+          }
+
+          /* Dark mode: Make context pad icons visible */
+          .dark .djs-context-pad .entry {
+            color: #1f2937 !important;
+            background-color: #f3f4f6 !important;
+          }
+
+          .dark .djs-context-pad .entry:before {
+            color: #1f2937 !important;
+          }
+
+          .dark .djs-context-pad .entry:hover {
+            background-color: #e5e7eb !important;
           }
         `}</style>
       </div>
