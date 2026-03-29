@@ -187,30 +187,17 @@ export function BpmnCanvas({
     const canvas = modelerRef.current.get('canvas') as any;
     const elementRegistry = modelerRef.current.get('elementRegistry') as any;
     const overlays = modelerRef.current.get('overlays') as any;
-    const modeling = modelerRef.current.get('modeling') as any;
 
     // Clear all existing overlays
     overlays.clear();
 
-    // Reset all element styles and restore original colors
+    // Reset all element styles - remove highlight markers only
+    // Do NOT touch inline fill/stroke — CSS marker classes handle highlighting
     elementRegistry.forEach((element: any) => {
       if (element.type === 'bpmn:Task' || element.type === 'bpmn:Group') {
-        // Remove marker classes
         canvas.removeMarker(element, 'highlight-system');
         canvas.removeMarker(element, 'highlight-control');
         canvas.removeMarker(element, 'highlight-critical');
-
-        // Explicitly restore original styling by removing inline styles
-        const gfx = elementRegistry.getGraphics(element);
-        if (gfx) {
-          const visual = gfx.querySelector('.djs-visual > :first-child');
-          if (visual) {
-            // Remove inline styles to allow CSS defaults to take over
-            visual.style.removeProperty('fill');
-            visual.style.removeProperty('stroke');
-            visual.style.removeProperty('stroke-width');
-          }
-        }
       }
     });
 
@@ -500,6 +487,11 @@ export function BpmnCanvas({
 
         {/* Add custom CSS for highlighting and styling */}
         <style>{`
+          /* Ensure Tasks and Groups have white fill by default in light mode */
+          [data-element-id] .djs-visual > rect {
+            fill: white;
+          }
+
           /* Dark mode: Make all BPMN element borders light colored for visibility */
           .dark .djs-visual > :first-child {
             stroke: #cbd5e1 !important;
