@@ -10,8 +10,18 @@ import { useSettings, useUpdateSetting, useSyncProcessManager, useSyncHistory, u
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { toast } from 'sonner';
-import { Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Clock, AlertTriangle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function Settings() {
   const { profile } = useAuth();
@@ -34,6 +44,10 @@ export default function Settings() {
 
   // Sync scope setting
   const [syncScope, setSyncScope] = useState('cps230_only');
+
+  // Sync scope warning dialog
+  const [scopeWarningOpen, setScopeWarningOpen] = useState(false);
+  const [pendingSyncScope, setPendingSyncScope] = useState<string | null>(null);
 
   // General settings
   const [accountName, setAccountName] = useState('');
@@ -222,7 +236,14 @@ export default function Settings() {
 
                       <div className="space-y-2">
                         <Label htmlFor="sync-scope">Sync Scope</Label>
-                        <Select value={syncScope} onValueChange={setSyncScope}>
+                        <Select value={syncScope} onValueChange={(value) => {
+                          if (value === 'cps230_only' && syncScope === 'all_processes') {
+                            setPendingSyncScope(value);
+                            setScopeWarningOpen(true);
+                          } else {
+                            setSyncScope(value);
+                          }
+                        }}>
                           <SelectTrigger id="sync-scope">
                             <SelectValue placeholder="Select sync scope..." />
                           </SelectTrigger>
@@ -420,6 +441,49 @@ export default function Settings() {
           </TabsContent>
         </Tabs>
       </div>
+      <AlertDialog open={scopeWarningOpen} onOpenChange={setScopeWarningOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-orange-500" />
+              Switch to CPS230 Only?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <span className="block">
+                Switching from "All Processes" to "CPS230 Tagged Processes Only" will remove
+                all non-CPS230 process data from the solution on the next sync, including:
+              </span>
+              <span className="block font-medium text-foreground">
+                - Processes not tagged with #CPS230
+                <br />
+                - Systems only referenced by removed processes
+                <br />
+                - Regions only referenced by removed processes
+              </span>
+              <span className="block">
+                This action cannot be undone. You would need to switch back to "All Processes"
+                and re-sync to restore the removed data.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingSyncScope(null)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-orange-600 hover:bg-orange-700"
+              onClick={() => {
+                if (pendingSyncScope) {
+                  setSyncScope(pendingSyncScope);
+                }
+                setPendingSyncScope(null);
+              }}
+            >
+              Switch to CPS230 Only
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }

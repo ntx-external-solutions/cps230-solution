@@ -19,7 +19,7 @@ import { useCreateControl, useUpdateControl } from '@/hooks/useControls';
 import { useCriticalOperations } from '@/hooks/useCriticalOperations';
 import { useSystems } from '@/hooks/useSystems';
 import { useProcesses } from '@/hooks/useProcesses';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { regionsApi } from '@/lib/api';
 import { toast } from 'sonner';
 import azureApi from '@/lib/azureApi';
@@ -41,6 +41,7 @@ interface ControlFormData {
 export function ControlDialog({ open, onOpenChange, control }: ControlDialogProps) {
   const createControl = useCreateControl();
   const updateControl = useUpdateControl();
+  const queryClient = useQueryClient();
   const { data: criticalOperations = [] } = useCriticalOperations();
   const { data: systems = [] } = useSystems();
   const { data: processes = [] } = useProcesses();
@@ -183,6 +184,9 @@ export function ControlDialog({ open, onOpenChange, control }: ControlDialogProp
         });
       }
 
+      // Invalidate after all junction entries are created so the table shows complete data
+      await queryClient.invalidateQueries({ queryKey: ['controls'] });
+
       toast.success(control ? 'Control updated successfully' : 'Control created successfully');
       onOpenChange(false);
     } catch (error) {
@@ -203,7 +207,7 @@ export function ControlDialog({ open, onOpenChange, control }: ControlDialogProp
   // Get available regions from database
   const availableRegions = regions.map((r: any) => ({
     code: r.region_code,
-    name: r.region_name,
+    name: r.region_name || r.region_code,
     icon: r.icon,
   }));
 

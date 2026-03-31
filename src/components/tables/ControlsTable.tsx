@@ -101,16 +101,54 @@ export function ControlsTable() {
       },
     },
     {
-      id: 'critical_operation',
-      header: 'Critical Operation',
+      id: 'critical_operations',
+      header: 'Critical Operations',
       cell: ({ row }) => {
-        const operation = (row.original as any).critical_operation;
+        const operations = (row.original as any).critical_operations as { id: string; operation_name: string }[] | undefined;
         return (
-          <div className="text-sm">
-            {operation?.operation_name ? (
-              <Badge variant="outline">{operation.operation_name}</Badge>
+          <div className="flex flex-wrap gap-1">
+            {operations && operations.length > 0 ? (
+              operations.map((op) => (
+                <Badge key={op.id} variant="outline">{op.operation_name}</Badge>
+              ))
             ) : (
-              <span className="text-muted-foreground">—</span>
+              <span className="text-sm text-muted-foreground">—</span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: 'processes',
+      header: 'Processes',
+      cell: ({ row }) => {
+        const procs = (row.original as any).processes as { id: string; process_name: string }[] | undefined;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {procs && procs.length > 0 ? (
+              procs.map((p) => (
+                <Badge key={p.id} variant="outline">{p.process_name}</Badge>
+              ))
+            ) : (
+              <span className="text-sm text-muted-foreground">—</span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: 'systems',
+      header: 'Systems',
+      cell: ({ row }) => {
+        const syss = (row.original as any).systems as { id: string; system_name: string }[] | undefined;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {syss && syss.length > 0 ? (
+              syss.map((s) => (
+                <Badge key={s.id} variant="outline">{s.system_name}</Badge>
+              ))
+            ) : (
+              <span className="text-sm text-muted-foreground">—</span>
             )}
           </div>
         );

@@ -18,6 +18,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const [theme, setThemeState] = useState<Theme>(savedTheme);
 
+  // Sync state when settings load from the server
+  useEffect(() => {
+    setThemeState(savedTheme);
+  }, [savedTheme]);
+
   const getSystemTheme = (): 'light' | 'dark' => {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   };

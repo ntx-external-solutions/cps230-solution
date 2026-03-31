@@ -221,17 +221,11 @@ async function handleSync(
       };
     }
 
-    context.log('Process Manager credentials configured:', {
-      siteUrl,
-      username,
-      tenantId,
-      hasPassword: !!password,
-    });
+    context.log('Process Manager credentials configured and ready');
 
     // Step 1: Authenticate with Process Manager using OAuth2
     // Construct full URL: regional domain + site identifier
     const fullSiteUrl = `${siteUrl}/${tenantId}`;
-    context.log(`Constructed fullSiteUrl: ${fullSiteUrl} (siteUrl: ${siteUrl}, tenantId: ${tenantId})`);
     const tokenUrl = `https://${fullSiteUrl}/oauth2/token`;
     const authBody = new URLSearchParams({
       grant_type: 'password',
@@ -251,7 +245,8 @@ async function handleSync(
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
-      throw new Error(`Process Manager authentication failed: ${tokenResponse.status} ${tokenResponse.statusText} - ${errorText}`);
+      context.error(`Process Manager authentication failed: ${tokenResponse.status} - ${errorText}`);
+      throw new Error(`Process Manager authentication failed: ${tokenResponse.status} ${tokenResponse.statusText}`);
     }
 
     const tokenData = await tokenResponse.json() as any;
@@ -285,7 +280,8 @@ async function handleSync(
 
       if (!listResponse.ok) {
         const errorText = await listResponse.text();
-        throw new Error(`Process list API failed: ${listResponse.status} ${listResponse.statusText} - ${errorText}`);
+        context.error(`Process list API failed: ${listResponse.status} - ${errorText}`);
+        throw new Error(`Process list API failed: ${listResponse.status} ${listResponse.statusText}`);
       }
 
       const listData = await listResponse.json() as any;
@@ -342,7 +338,8 @@ async function handleSync(
 
       if (!searchTokenResponse.ok) {
         const errorText = await searchTokenResponse.text();
-        throw new Error(`Failed to get search token: ${searchTokenResponse.status} ${searchTokenResponse.statusText} - ${errorText}`);
+        context.error(`Failed to get search token: ${searchTokenResponse.status} - ${errorText}`);
+        throw new Error(`Failed to get search token: ${searchTokenResponse.status} ${searchTokenResponse.statusText}`);
       }
 
       const responseText = await searchTokenResponse.text();
@@ -384,7 +381,8 @@ async function handleSync(
 
       if (!searchResponse.ok) {
         const errorText = await searchResponse.text();
-        throw new Error(`Process search failed: ${searchResponse.status} ${searchResponse.statusText} - ${errorText}`);
+        context.error(`Process search failed: ${searchResponse.status} - ${errorText}`);
+        throw new Error(`Process search failed: ${searchResponse.status} ${searchResponse.statusText}`);
       }
 
       const searchData = await searchResponse.json() as any;
@@ -499,7 +497,7 @@ async function handleSync(
           });
           if (!resp.ok) {
             const errorText = await resp.text();
-            throw new Error(`Process ${uid}: ${resp.status} - ${errorText}`);
+            throw new Error(`Process ${uid}: ${resp.status} ${resp.statusText}`);
           }
           return { uid, data: await resp.json() as any };
         })
@@ -766,6 +764,38 @@ async function handleSync(
       [JSON.stringify(new Date().toISOString()), userProfile.email]
     );
 
+    // If sync scope is cps230_only, clean up non-CPS230 data
+    let cleanedUp = { processes: 0, systems: 0, regions: 0 };
+    if (syncScope === 'cps230_only') {
+      context.log('Cleaning up non-CPS230 process data...');
+
+      // Delete non-CPS230 processes (cascade will remove junction entries)
+      const deleteProcessesResult = await client.query(
+        `DELETE FROM processes WHERE is_cps230_tagged = false RETURNING id`
+      );
+      cleanedUp.processes = deleteProcessesResult.rowCount || 0;
+
+      // Delete orphaned systems (not linked to any remaining process)
+      const deleteSystemsResult = await client.query(
+        `DELETE FROM systems WHERE id NOT IN (
+          SELECT DISTINCT system_id FROM process_systems
+        ) RETURNING id`
+      );
+      cleanedUp.systems = deleteSystemsResult.rowCount || 0;
+
+      // Delete orphaned regions (not referenced by any remaining process)
+      const deleteRegionsResult = await client.query(
+        `DELETE FROM regions WHERE region_code NOT IN (
+          SELECT DISTINCT UNNEST(regions) FROM processes WHERE regions IS NOT NULL
+        ) RETURNING id`
+      );
+      cleanedUp.regions = deleteRegionsResult.rowCount || 0;
+
+      if (cleanedUp.processes > 0 || cleanedUp.systems > 0 || cleanedUp.regions > 0) {
+        context.log(`Cleanup complete: removed ${cleanedUp.processes} processes, ${cleanedUp.systems} systems, ${cleanedUp.regions} regions`);
+      }
+    }
+
     return {
       status: 200,
       headers: corsHeaders,
@@ -776,6 +806,7 @@ async function handleSync(
         recordsSynced,
         totalFound: processUniqueIds.length,
         errors: errors.length > 0 ? errors : undefined,
+        cleanedUp: syncScope === 'cps230_only' ? cleanedUp : undefined,
       },
     };
   } catch (error: any) {

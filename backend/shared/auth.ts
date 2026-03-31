@@ -91,16 +91,6 @@ export async function verifyToken(token: string): Promise<DecodedToken> {
     throw new Error('Azure AD configuration is incomplete');
   }
 
-  // Decode token without verification to see claims for debugging
-  const decoded = jwt.decode(token, { complete: true });
-  console.log('Token verification attempt:', {
-    expectedAudience: clientId,
-    expectedIssuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
-    actualAudience: (decoded?.payload as any)?.aud,
-    actualIssuer: (decoded?.payload as any)?.iss,
-    kid: decoded?.header?.kid,
-  });
-
   return new Promise((resolve, reject) => {
     jwt.verify(
       token,
@@ -275,7 +265,7 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
     const existingUser = emailResult.rows[0];
 
     // User exists with this email - link Azure AD to existing account
-    console.log(`Linking Azure AD account to existing user: ${email} (was ${existingUser.auth_type}, has password: ${!!existingUser.password_hash})`);
+    console.log('Linking Azure AD account to existing user profile');
 
     const updateResult = await query(
       `UPDATE user_profiles
@@ -320,7 +310,7 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
 
   const user = insertResult.rows[0];
 
-  console.log(`Created new Azure AD user: ${email} with role ${role}`);
+  console.log('Created new Azure AD user profile');
 
   return {
     id: user.id,
