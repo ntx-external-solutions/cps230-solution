@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -177,11 +177,28 @@ export function ProcessPropertiesPanel({
                       No processes found
                     </div>
                   ) : (
-                    processes.map((process) => (
-                      <SelectItem key={process.id} value={process.id} className="text-sm">
-                        {process.process_name}
-                      </SelectItem>
-                    ))
+                    <>
+                      {processes.some(p => p.is_cps230_tagged) && (
+                        <SelectGroup>
+                          <SelectLabel>CPS230 Processes</SelectLabel>
+                          {processes.filter(p => p.is_cps230_tagged).map((process) => (
+                            <SelectItem key={process.id} value={process.id} className="text-sm">
+                              {process.process_name}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
+                      {processes.some(p => !p.is_cps230_tagged) && (
+                        <SelectGroup>
+                          <SelectLabel>Other Processes</SelectLabel>
+                          {processes.filter(p => !p.is_cps230_tagged).map((process) => (
+                            <SelectItem key={process.id} value={process.id} className="text-sm">
+                              {process.process_name}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
+                    </>
                   )}
                 </SelectContent>
               </Select>

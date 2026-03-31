@@ -17,6 +17,7 @@ import type { CriticalOperation } from '@/types/database';
 import { useCreateCriticalOperation, useUpdateCriticalOperation } from '@/hooks/useCriticalOperations';
 import { useSystems } from '@/hooks/useSystems';
 import { useProcesses } from '@/hooks/useProcesses';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import azureApi from '@/lib/azureApi';
 
@@ -39,6 +40,7 @@ export function CriticalOperationDialog({
 }: CriticalOperationDialogProps) {
   const createOperation = useCreateCriticalOperation();
   const updateOperation = useUpdateCriticalOperation();
+  const queryClient = useQueryClient();
   const { data: systems = [] } = useSystems();
   const { data: processes = [] } = useProcesses();
 
@@ -148,6 +150,9 @@ export function CriticalOperationDialog({
           system_id: systemId,
         });
       }
+
+      // Invalidate after all junction entries are created so the table shows complete data
+      await queryClient.invalidateQueries({ queryKey: ['critical_operations'] });
 
       toast.success(operation ? 'Critical operation updated successfully' : 'Critical operation created successfully');
       onOpenChange(false);

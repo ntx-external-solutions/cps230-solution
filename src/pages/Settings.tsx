@@ -16,7 +16,7 @@ import { Switch } from '@/components/ui/switch';
 export default function Settings() {
   const { profile } = useAuth();
   const { theme, setTheme } = useTheme();
-  const { data: settings = [], isLoading } = useSettings(['pm_site_url', 'pm_username', 'pm_password', 'pm_tenant_id', 'dashboard_filters_expanded']);
+  const { data: settings = [], isLoading } = useSettings(['pm_site_url', 'pm_username', 'pm_password', 'pm_tenant_id', 'sync_scope', 'dashboard_filters_expanded']);
   const updateSettings = useUpdateSetting();
   const syncPM = useSyncProcessManager();
   const cancelSync = useCancelSync();
@@ -32,6 +32,9 @@ export default function Settings() {
   const [password, setPassword] = useState('');
   const [tenantId, setTenantId] = useState('');
 
+  // Sync scope setting
+  const [syncScope, setSyncScope] = useState('cps230_only');
+
   // General settings
   const [accountName, setAccountName] = useState('');
   const [isLoadingAccount, setIsLoadingAccount] = useState(true);
@@ -43,6 +46,7 @@ export default function Settings() {
       setUsername((settings.find(s => s.key === 'pm_username')?.value as string) || '');
       setPassword((settings.find(s => s.key === 'pm_password')?.value as string) || '');
       setTenantId((settings.find(s => s.key === 'pm_tenant_id')?.value as string) || '');
+      setSyncScope((settings.find(s => s.key === 'sync_scope')?.value as string) || 'cps230_only');
       setDashboardFiltersExpanded((settings.find(s => s.key === 'dashboard_filters_expanded')?.value as boolean) ?? false);
     }
   }, [settings]);
@@ -64,6 +68,7 @@ export default function Settings() {
         { key: 'pm_username', value: username },
         { key: 'pm_password', value: password }, // ⚠️ PLAINTEXT PASSWORD
         { key: 'pm_tenant_id', value: tenantId },
+        { key: 'sync_scope', value: syncScope },
       ]);
       toast.success('Connection settings saved successfully');
     } catch (error) {
@@ -213,6 +218,22 @@ export default function Settings() {
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                         />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="sync-scope">Sync Scope</Label>
+                        <Select value={syncScope} onValueChange={setSyncScope}>
+                          <SelectTrigger id="sync-scope">
+                            <SelectValue placeholder="Select sync scope..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="cps230_only">CPS230 Tagged Processes Only</SelectItem>
+                            <SelectItem value="all_processes">All Processes</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Choose whether to sync only CPS230-tagged processes or all processes from your Nintex site.
+                        </p>
                       </div>
 
                       <div className="space-y-2">

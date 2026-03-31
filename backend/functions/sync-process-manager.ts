@@ -187,11 +187,16 @@ async function handleSync(
       "SELECT value FROM settings WHERE key = 'pm_tenant_id'"
     );
 
+    const syncScopeResult = await client.query(
+      "SELECT value FROM settings WHERE key = 'sync_scope'"
+    );
+
     // JSONB values are automatically parsed by PostgreSQL, no need for JSON.parse
     const siteUrl = siteUrlResult.rows[0]?.value || '';
     const username = usernameResult.rows[0]?.value || '';
     const password = passwordResult.rows[0]?.value || '';
     const tenantId = tenantIdResult.rows[0]?.value || '';
+    const syncScope = syncScopeResult.rows[0]?.value || 'cps230_only';
 
     // Check if Process Manager is configured
     if (!siteUrl || !username || !password || !tenantId) {
@@ -258,111 +263,180 @@ async function handleSync(
 
     context.log('Successfully authenticated with Process Manager');
 
-    // Step 2: Get search service token
-    const searchTokenUrl = `https://${fullSiteUrl}/search/GetSearchServiceToken`;
-    context.log('Getting search service token...');
-    const searchTokenResponse = await fetch(searchTokenUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-      },
-    });
+    // Step 2-4: Discover processes based on sync scope
+    let processUniqueIds: string[] = [];
 
-    if (!searchTokenResponse.ok) {
-      const errorText = await searchTokenResponse.text();
-      throw new Error(`Failed to get search token: ${searchTokenResponse.status} ${searchTokenResponse.statusText} - ${errorText}`);
-    }
+    if (syncScope === 'all_processes') {
+      // Fetch ALL processes using the BFF Process List API
+      context.log('Sync scope: all_processes - Fetching all processes from BFF API');
+      const pageSize = 100;
+      let page = 1;
+      let totalItemCount = 0;
 
-    const responseText = await searchTokenResponse.text();
+      // Fetch first page to get totalItemCount
+      const listUrl = `https://${fullSiteUrl}/Bff/Process/api/v1/processes?Page=${page}&PageSize=${pageSize}&ListType=0`;
+      context.log(`Fetching process list page ${page} from: ${listUrl}`);
+      const listResponse = await fetch(listUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
 
-    // Try parsing as JSON first (search token might be in various formats)
-    let searchToken: string;
-    try {
-      const data = JSON.parse(responseText);
-      // Search for token in various possible field names
-      searchToken = data.Message || data.access_token || data.token || data.Token || data.AccessToken || responseText;
-    } catch (e) {
-      // If not JSON, the response might be the token itself
-      searchToken = responseText;
-    }
-
-    context.log('Successfully obtained search service token');
-
-    // Step 3: Map site URL to search endpoint
-    const searchEndpoint = getSearchEndpoint(siteUrl);
-    context.log(`Using search endpoint: ${searchEndpoint}`);
-
-    // Step 4: Search for processes tagged with #CPS230
-    const searchUrl = `https://${searchEndpoint}/fullsearch`;
-    const searchParams = new URLSearchParams({
-      SearchCriteria: '#cps230', // URLSearchParams will encode this to %23cps230 (case-insensitive search)
-      IncludedTypes: '1', // 1 = processes (0 = all, 1 = processes only)
-      SearchMatchType: '0',
-      pageNumber: '1',
-      PageSize: '100',
-    });
-
-    const fullSearchUrl = `${searchUrl}?${searchParams}`;
-    context.log(`Searching for #CPS230 tagged processes at: ${fullSearchUrl}`);
-
-    const searchResponse = await fetch(fullSearchUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${searchToken}`,
-      },
-    });
-
-    if (!searchResponse.ok) {
-      const errorText = await searchResponse.text();
-      throw new Error(`Process search failed: ${searchResponse.status} ${searchResponse.statusText} - ${errorText}`);
-    }
-
-    const searchData = await searchResponse.json() as any;
-
-    context.log(`Search API returned ${searchData.response?.length || 0} results. Success: ${searchData.success}`);
-
-    if (!searchData.success) {
-      context.error('Search API returned unsuccessful response:', searchData);
-      throw new Error('Search API returned unsuccessful response');
-    }
-
-    // Filter results that have CPS230 in highlights
-    const cps230Processes = (searchData.response || []).filter((result: any) => {
-      const highlights = result.HighLights;
-      if (!highlights) {
-        return true; // If search returned it for "CPS230", include it
+      if (!listResponse.ok) {
+        const errorText = await listResponse.text();
+        throw new Error(`Process list API failed: ${listResponse.status} ${listResponse.statusText} - ${errorText}`);
       }
 
-      // Check all highlight types for #CPS230
-      const allHighlights = [
-        ...(highlights.Activities || []),
-        ...(highlights.Tasks || []),
-        ...(highlights.LeanTags || []),
-        ...(highlights.ProcessTags || []),
-      ].join(' ');
+      const listData = await listResponse.json() as any;
+      totalItemCount = listData.totalItemCount || 0;
+      const totalPages = Math.ceil(totalItemCount / pageSize);
 
-      return allHighlights.includes('#CPS230') || allHighlights.includes('#cps230') || allHighlights.includes('CPS230');
-    });
+      context.log(`BFF API reports ${totalItemCount} total processes across ${totalPages} pages`);
 
-    // Extract unique IDs from ProcessUniqueId or ItemUrl
-    const processUniqueIds = cps230Processes
-      .map((p: any) => {
-        if (p.ProcessUniqueId) {
-          return p.ProcessUniqueId;
+      // Collect unique IDs from first page
+      for (const item of (listData.items || [])) {
+        if (item.processUniqueId) {
+          processUniqueIds.push(item.processUniqueId);
         }
-        if (p.ItemUrl) {
-          const match = p.ItemUrl.match(/\/Process\/([a-f0-9-]+)/i);
-          if (match && match[1]) {
-            return match[1];
+      }
+
+      // Fetch remaining pages
+      for (page = 2; page <= totalPages; page++) {
+        const pageUrl = `https://${fullSiteUrl}/Bff/Process/api/v1/processes?Page=${page}&PageSize=${pageSize}&ListType=0`;
+        context.log(`Fetching process list page ${page} of ${totalPages}`);
+        const pageResponse = await fetch(pageUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
+
+        if (!pageResponse.ok) {
+          context.warn(`Failed to fetch page ${page}: ${pageResponse.status}`);
+          continue;
+        }
+
+        const pageData = await pageResponse.json() as any;
+        for (const item of (pageData.items || [])) {
+          if (item.processUniqueId) {
+            processUniqueIds.push(item.processUniqueId);
           }
         }
-        return null;
-      })
-      .filter((id: any) => id); // Filter out any null/undefined
+      }
 
-    context.log(`Found ${processUniqueIds.length} processes with #CPS230 tag`);
+      context.log(`Collected ${processUniqueIds.length} process unique IDs from BFF API`);
+    } else {
+      // CPS230-only mode: Use search API (existing behavior)
+      context.log('Sync scope: cps230_only - Searching for #CPS230 tagged processes');
+
+      // Get search service token
+      const searchTokenUrl = `https://${fullSiteUrl}/search/GetSearchServiceToken`;
+      context.log('Getting search service token...');
+      const searchTokenResponse = await fetch(searchTokenUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!searchTokenResponse.ok) {
+        const errorText = await searchTokenResponse.text();
+        throw new Error(`Failed to get search token: ${searchTokenResponse.status} ${searchTokenResponse.statusText} - ${errorText}`);
+      }
+
+      const responseText = await searchTokenResponse.text();
+
+      // Try parsing as JSON first (search token might be in various formats)
+      let searchToken: string;
+      try {
+        const data = JSON.parse(responseText);
+        searchToken = data.Message || data.access_token || data.token || data.Token || data.AccessToken || responseText;
+      } catch (e) {
+        searchToken = responseText;
+      }
+
+      context.log('Successfully obtained search service token');
+
+      // Map site URL to search endpoint
+      const searchEndpoint = getSearchEndpoint(siteUrl);
+      context.log(`Using search endpoint: ${searchEndpoint}`);
+
+      // Search for processes tagged with #CPS230
+      const searchUrl = `https://${searchEndpoint}/fullsearch`;
+      const searchParams = new URLSearchParams({
+        SearchCriteria: '#cps230',
+        IncludedTypes: '1',
+        SearchMatchType: '0',
+        pageNumber: '1',
+        PageSize: '100',
+      });
+
+      const fullSearchUrl = `${searchUrl}?${searchParams}`;
+      context.log(`Searching for #CPS230 tagged processes at: ${fullSearchUrl}`);
+
+      const searchResponse = await fetch(fullSearchUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${searchToken}`,
+        },
+      });
+
+      if (!searchResponse.ok) {
+        const errorText = await searchResponse.text();
+        throw new Error(`Process search failed: ${searchResponse.status} ${searchResponse.statusText} - ${errorText}`);
+      }
+
+      const searchData = await searchResponse.json() as any;
+
+      context.log(`Search API returned ${searchData.response?.length || 0} results. Success: ${searchData.success}`);
+
+      if (!searchData.success) {
+        context.error('Search API returned unsuccessful response:', searchData);
+        throw new Error('Search API returned unsuccessful response');
+      }
+
+      // Filter results that have CPS230 in highlights
+      const cps230Processes = (searchData.response || []).filter((result: any) => {
+        const highlights = result.HighLights;
+        if (!highlights) {
+          return true;
+        }
+
+        const allHighlights = [
+          ...(highlights.Activities || []),
+          ...(highlights.Tasks || []),
+          ...(highlights.LeanTags || []),
+          ...(highlights.ProcessTags || []),
+        ].join(' ');
+
+        return allHighlights.includes('#CPS230') || allHighlights.includes('#cps230') || allHighlights.includes('CPS230');
+      });
+
+      // Extract unique IDs from ProcessUniqueId or ItemUrl
+      processUniqueIds = cps230Processes
+        .map((p: any) => {
+          if (p.ProcessUniqueId) {
+            return p.ProcessUniqueId;
+          }
+          if (p.ItemUrl) {
+            const match = p.ItemUrl.match(/\/Process\/([a-f0-9-]+)/i);
+            if (match && match[1]) {
+              return match[1];
+            }
+          }
+          return null;
+        })
+        .filter((id: any) => id) as string[];
+
+      context.log(`Found ${processUniqueIds.length} processes with #CPS230 tag`);
+    }
 
     if (processUniqueIds.length === 0) {
+      const noProcessesMsg = syncScope === 'all_processes'
+        ? 'No processes found in Process Manager site.'
+        : 'No CPS230 tagged processes found in Process Manager';
+
       await client.query(
         `UPDATE sync_history SET
           status = $1,
@@ -370,14 +444,14 @@ async function handleSync(
           error_message = $3,
           completed_at = NOW()
         WHERE id = $4`,
-        ['success', 0, 'No CPS230 tagged processes found in Process Manager', syncHistoryId]
+        ['success', 0, noProcessesMsg, syncHistoryId]
       );
 
       return {
         status: 200,
         headers: corsHeaders,
         jsonBody: {
-          message: 'No CPS230 tagged processes found in Process Manager site.',
+          message: noProcessesMsg,
           syncHistoryId,
           status: 'success',
           recordsSynced: 0,
@@ -388,66 +462,83 @@ async function handleSync(
     // Step 6: Fetch detailed process data for each unique ID and store in database
     let recordsSynced = 0;
     const errors: string[] = [];
+    const detailBatchSize = 20;
+    const totalBatches = Math.ceil(processUniqueIds.length / detailBatchSize);
 
-    for (const processUniqueId of processUniqueIds) {
-      try {
-        // Fetch detailed process data using the site token (not search token)
-        const processUrl = `https://${fullSiteUrl}/Api/v1/Processes/${processUniqueId}`;
-        context.log(`Fetching process details from: ${processUrl}`);
-        const processResponse = await fetch(processUrl, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        });
+    // Update sync history with total process count
+    await client.query(
+      `UPDATE sync_history SET
+        total_processes = $1,
+        total_batches = $2,
+        batch_size = $3
+      WHERE id = $4`,
+      [processUniqueIds.length, totalBatches, detailBatchSize, syncHistoryId]
+    );
 
-        if (!processResponse.ok) {
-          const errorText = await processResponse.text();
-          context.error(`Failed to fetch process ${processUniqueId}: ${processResponse.status} - ${errorText}`);
-          errors.push(`Process ${processUniqueId}: ${processResponse.statusText}`);
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const batchStart = batchIndex * detailBatchSize;
+      const batch = processUniqueIds.slice(batchStart, batchStart + detailBatchSize);
+      context.log(`Processing batch ${batchIndex + 1} of ${totalBatches} (${batch.length} processes)`);
+
+      // Update current batch in sync history
+      await client.query(
+        `UPDATE sync_history SET current_batch = $1, processed_count = $2 WHERE id = $3`,
+        [batchIndex + 1, batchStart, syncHistoryId]
+      );
+
+      // Fetch details concurrently within each batch
+      const batchResults = await Promise.allSettled(
+        batch.map(async (uid) => {
+          const processUrl = `https://${fullSiteUrl}/Api/v1/Processes/${uid}`;
+          const resp = await fetch(processUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+          });
+          if (!resp.ok) {
+            const errorText = await resp.text();
+            throw new Error(`Process ${uid}: ${resp.status} - ${errorText}`);
+          }
+          return { uid, data: await resp.json() as any };
+        })
+      );
+
+      // Process each result sequentially (DB writes)
+      for (const result of batchResults) {
+        if (result.status === 'rejected') {
+          context.error(`Failed to fetch process:`, result.reason);
+          errors.push(`${result.reason}`);
           continue;
         }
 
-        const processData = await processResponse.json() as any;
+        const { uid: processUniqueId, data: processData } = result.value;
 
-        // Process name and metadata are inside the processJson object
-        const processJson = processData.processJson || {};
+        try {
+          // Process name and metadata are inside the processJson object
+          const processJson = processData.processJson || {};
 
-        context.log(`Process ${processUniqueId} processJson keys:`, Object.keys(processJson).join(', '));
+          context.log(`Process ${processUniqueId} processJson keys:`, Object.keys(processJson).join(', '));
 
-        // Extract process name and metadata from processJson
-        const processName = processJson.Name || null;
-        const processExpert = processJson.Expert || null;  // It's a string, not an object
-        const processOwner = processJson.Owner || null;    // It's a string, not an object
-        const processStatus = processJson.State || null;
+          // Extract process name and metadata from processJson
+          const processName = processJson.Name || null;
+          const processExpert = processJson.Expert || null;
+          const processOwner = processJson.Owner || null;
+          const processStatus = processJson.State || null;
 
-        // Extract tags and system tags from activities
-        const tagSet = new Set<string>();
-        const systemTagsMap = new Map<string, { id: string; name: string }>();
-        const regionSet = new Set<string>();
-        const activities = processJson.ProcessProcedures?.Activity || [];
+          // Extract tags and system tags from activities
+          const tagSet = new Set<string>();
+          const systemTagsMap = new Map<string, { id: string; name: string }>();
+          const regionSet = new Set<string>();
+          const activities = processJson.ProcessProcedures?.Activity || [];
 
-        for (const activity of activities) {
-          const activityTags = activity.Ownerships?.Tag || [];
-          for (const tag of activityTags) {
-            if (tag.Name) {
-              tagSet.add(tag.Name);
-            }
-            // Extract system tags (tags with TagFamilyName === 'System')
-            if (tag.TagFamilyName === 'System' && tag.Id && tag.Name) {
-              systemTagsMap.set(tag.Id.toString(), {
-                id: tag.Id.toString(),
-                name: tag.Name
-              });
-            }
-          }
-
-          // Also check tasks within activities for system tags
-          const tasks = activity.ChildProcessProcedures?.Task || [];
-          for (const task of tasks) {
-            const taskTags = task.Ownerships?.Tag || [];
-            for (const tag of taskTags) {
+          for (const activity of activities) {
+            const activityTags = activity.Ownerships?.Tag || [];
+            for (const tag of activityTags) {
+              if (tag.Name) {
+                tagSet.add(tag.Name);
+              }
               if (tag.TagFamilyName === 'System' && tag.Id && tag.Name) {
                 systemTagsMap.set(tag.Id.toString(), {
                   id: tag.Id.toString(),
@@ -455,206 +546,211 @@ async function handleSync(
                 });
               }
             }
-          }
 
-          // Extract region codes from role names
-          const activityRoles = activity.Ownerships?.Role || [];
-          for (const role of activityRoles) {
-            if (role.Name) {
-              // Look for pattern like "Team - UK" or "Team Name - AU"
-              // Extract text after the last " - "
-              // Region codes are typically 2-3 letters (ISO country codes)
-              const match = role.Name.match(/\s-\s([A-Z]{2,3})$/i);
-              if (match) {
-                const regionCode = match[1].toUpperCase();
-                regionSet.add(regionCode);
+            const tasks = activity.ChildProcessProcedures?.Task || [];
+            for (const task of tasks) {
+              const taskTags = task.Ownerships?.Tag || [];
+              for (const tag of taskTags) {
+                if (tag.TagFamilyName === 'System' && tag.Id && tag.Name) {
+                  systemTagsMap.set(tag.Id.toString(), {
+                    id: tag.Id.toString(),
+                    name: tag.Name
+                  });
+                }
+              }
+            }
+
+            const activityRoles = activity.Ownerships?.Role || [];
+            for (const role of activityRoles) {
+              if (role.Name) {
+                const match = role.Name.match(/\s-\s([A-Z]{2,3})$/i);
+                if (match) {
+                  const regionCode = match[1].toUpperCase();
+                  regionSet.add(regionCode);
+                }
               }
             }
           }
-        }
 
-        const tagArray = Array.from(tagSet);
-        const systemTags = Array.from(systemTagsMap.values());
-        const regionCodes = Array.from(regionSet);
+          const tagArray = Array.from(tagSet);
+          const systemTags = Array.from(systemTagsMap.values());
+          const regionCodes = Array.from(regionSet);
 
-        // Check if #CPS230 tag exists
-        const isCPS230Tagged = tagArray.some((tag: string) =>
-          tag && tag.toLowerCase().includes('cps230')
-        );
+          // Check if #CPS230 tag exists
+          const isCPS230Tagged = tagArray.some((tag: string) =>
+            tag && tag.toLowerCase().includes('cps230')
+          );
 
-        // Insert discovered regions into the regions table (if they don't exist)
-        for (const regionCode of regionCodes) {
-          try {
-            await client.query(
-              `INSERT INTO regions (region_code, modified_by)
-               VALUES ($1, $2)
-               ON CONFLICT (region_code) DO NOTHING`,
-              [regionCode, userProfile.email]
-            );
-          } catch (regionError) {
-            context.warn(`Failed to insert region ${regionCode}:`, regionError);
-          }
-        }
-
-        // Insert/update discovered systems from System tags
-        for (const systemTag of systemTags) {
-          try {
-            // Check if system already exists by pm_tag_id
-            const existingSystem = await client.query(
-              `SELECT id FROM systems WHERE pm_tag_id = $1 AND account_id = $2`,
-              [systemTag.id, userProfile.account_id]
-            );
-
-            if (existingSystem.rows.length > 0) {
-              // Update existing system
+          // Insert discovered regions into the regions table (if they don't exist)
+          for (const regionCode of regionCodes) {
+            try {
               await client.query(
-                `UPDATE systems
-                 SET system_name = $1, system_id = $2, modified_by = $3, modified_date = NOW()
-                 WHERE pm_tag_id = $4 AND account_id = $5`,
-                [systemTag.name, systemTag.id, userProfile.email, systemTag.id, userProfile.account_id]
+                `INSERT INTO regions (region_code, modified_by)
+                 VALUES ($1, $2)
+                 ON CONFLICT (region_code) DO NOTHING`,
+                [regionCode, userProfile.email]
               );
-            } else {
-              // Insert new system
-              await client.query(
-                `INSERT INTO systems (system_name, system_id, pm_tag_id, modified_by, account_id)
-                 VALUES ($1, $2, $3, $4, $5)
-                 ON CONFLICT (system_id, account_id) DO UPDATE
-                 SET system_name = EXCLUDED.system_name, modified_by = EXCLUDED.modified_by, modified_date = NOW()`,
-                [systemTag.name, systemTag.id, systemTag.id, userProfile.email, userProfile.account_id]
-              );
+            } catch (regionError) {
+              context.warn(`Failed to insert region ${regionCode}:`, regionError);
             }
-          } catch (systemError) {
-            context.warn(`Failed to upsert system ${systemTag.name}:`, systemError);
           }
-        }
 
-        // Owner and Expert are strings in this API, not objects
-        // Store them as simple JSON for consistency
-        const ownerData = processOwner ? { name: processOwner } : null;
-        const expertData = processExpert ? { name: processExpert } : null;
-
-        // Extract process metadata (inputs, outputs, triggers, targets)
-        const inputs = processJson.Inputs?.Input || null;
-        const outputs = processJson.Outputs?.Output || null;
-        const triggers = processJson.Triggers?.Trigger || null;
-        const targets = processJson.Targets?.Target || null;
-
-        // Upsert process to database and get the process ID
-        const processResult = await client.query(
-          `INSERT INTO processes (
-            process_name,
-            process_unique_id,
-            owner_username,
-            process_expert,
-            process_status,
-            process_owner_data,
-            process_expert_data,
-            metadata,
-            is_cps230_tagged,
-            tags,
-            inputs,
-            outputs,
-            triggers,
-            targets,
-            modified_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-          ON CONFLICT (process_unique_id)
-          DO UPDATE SET
-            process_name = EXCLUDED.process_name,
-            owner_username = EXCLUDED.owner_username,
-            process_expert = EXCLUDED.process_expert,
-            process_status = EXCLUDED.process_status,
-            process_owner_data = EXCLUDED.process_owner_data,
-            process_expert_data = EXCLUDED.process_expert_data,
-            metadata = EXCLUDED.metadata,
-            is_cps230_tagged = EXCLUDED.is_cps230_tagged,
-            tags = EXCLUDED.tags,
-            inputs = EXCLUDED.inputs,
-            outputs = EXCLUDED.outputs,
-            triggers = EXCLUDED.triggers,
-            targets = EXCLUDED.targets,
-            modified_by = EXCLUDED.modified_by,
-            modified_date = NOW()
-          RETURNING id`,
-          [
-            processName,
-            processUniqueId,
-            processOwner,
-            processExpert,
-            processStatus,
-            ownerData ? JSON.stringify(ownerData) : null,
-            expertData ? JSON.stringify(expertData) : null,
-            JSON.stringify({
-              referenceNo: processJson.ReferenceNo || '',
-              processGroup: processJson.Group || '',
-              version: processJson.Version || '',
-              publishState: processJson.State || '',
-              objective: processJson.Objective || '',
-              background: processJson.Background || '',
-            }),
-            isCPS230Tagged,
-            tagArray,
-            inputs ? JSON.stringify(inputs) : null,
-            outputs ? JSON.stringify(outputs) : null,
-            triggers ? JSON.stringify(triggers) : null,
-            targets ? JSON.stringify(targets) : null,
-            userProfile.email,
-          ]
-        );
-
-        const processId = processResult.rows[0].id;
-
-        // Link systems to process via process_systems junction table
-        // First, delete existing system links for this process
-        await client.query(
-          `DELETE FROM process_systems WHERE process_id = $1`,
-          [processId]
-        );
-
-        // Then insert new system links
-        for (const systemTag of systemTags) {
-          try {
-            // Get the system ID from the systems table using pm_tag_id
-            const systemResult = await client.query(
-              `SELECT id FROM systems WHERE pm_tag_id = $1 AND account_id = $2`,
-              [systemTag.id, userProfile.account_id]
-            );
-
-            if (systemResult.rows.length > 0) {
-              const systemId = systemResult.rows[0].id;
-
-              // Create the process-system link
-              await client.query(
-                `INSERT INTO process_systems (process_id, system_id, modified_by)
-                 VALUES ($1, $2, $3)
-                 ON CONFLICT (process_id, system_id) DO NOTHING`,
-                [processId, systemId, userProfile.email]
+          // Insert/update discovered systems from System tags
+          for (const systemTag of systemTags) {
+            try {
+              const existingSystem = await client.query(
+                `SELECT id FROM systems WHERE pm_tag_id = $1 AND account_id IS NOT DISTINCT FROM $2`,
+                [systemTag.id, userProfile.account_id]
               );
-            }
-          } catch (systemLinkError) {
-            context.warn(`Failed to link system ${systemTag.name} to process ${processName}:`, systemLinkError);
-          }
-        }
 
-        context.log(`Successfully synced process: ${processData.name}`);
-        recordsSynced++;
-      } catch (error: any) {
-        context.error(`Error processing process ${processUniqueId}:`, error);
-        errors.push(`${processUniqueId}: ${error.message}`);
+              if (existingSystem.rows.length > 0) {
+                await client.query(
+                  `UPDATE systems
+                   SET system_name = $1, system_id = $2, modified_by = $3, modified_date = NOW()
+                   WHERE pm_tag_id = $4 AND account_id IS NOT DISTINCT FROM $5`,
+                  [systemTag.name, systemTag.id, userProfile.email, systemTag.id, userProfile.account_id]
+                );
+              } else {
+                await client.query(
+                  `INSERT INTO systems (system_name, system_id, pm_tag_id, modified_by, account_id)
+                   VALUES ($1, $2, $3, $4, $5)
+                   ON CONFLICT (system_id, COALESCE(account_id, '00000000-0000-0000-0000-000000000000')) DO UPDATE
+                   SET system_name = EXCLUDED.system_name, modified_by = EXCLUDED.modified_by, modified_date = NOW()`,
+                  [systemTag.name, systemTag.id, systemTag.id, userProfile.email, userProfile.account_id]
+                );
+              }
+            } catch (systemError) {
+              context.warn(`Failed to upsert system ${systemTag.name}:`, systemError);
+            }
+          }
+
+          const ownerData = processOwner ? { name: processOwner } : null;
+          const expertData = processExpert ? { name: processExpert } : null;
+
+          const inputs = processJson.Inputs?.Input || null;
+          const outputs = processJson.Outputs?.Output || null;
+          const triggers = processJson.Triggers?.Trigger || null;
+          const targets = processJson.Targets?.Target || null;
+
+          // Upsert process to database and get the process ID
+          const processResult = await client.query(
+            `INSERT INTO processes (
+              process_name,
+              process_unique_id,
+              owner_username,
+              process_expert,
+              process_status,
+              process_owner_data,
+              process_expert_data,
+              metadata,
+              is_cps230_tagged,
+              tags,
+              inputs,
+              outputs,
+              triggers,
+              targets,
+              modified_by
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            ON CONFLICT (process_unique_id)
+            DO UPDATE SET
+              process_name = EXCLUDED.process_name,
+              owner_username = EXCLUDED.owner_username,
+              process_expert = EXCLUDED.process_expert,
+              process_status = EXCLUDED.process_status,
+              process_owner_data = EXCLUDED.process_owner_data,
+              process_expert_data = EXCLUDED.process_expert_data,
+              metadata = EXCLUDED.metadata,
+              is_cps230_tagged = EXCLUDED.is_cps230_tagged,
+              tags = EXCLUDED.tags,
+              inputs = EXCLUDED.inputs,
+              outputs = EXCLUDED.outputs,
+              triggers = EXCLUDED.triggers,
+              targets = EXCLUDED.targets,
+              modified_by = EXCLUDED.modified_by,
+              modified_date = NOW()
+            RETURNING id`,
+            [
+              processName,
+              processUniqueId,
+              processOwner,
+              processExpert,
+              processStatus,
+              ownerData ? JSON.stringify(ownerData) : null,
+              expertData ? JSON.stringify(expertData) : null,
+              JSON.stringify({
+                referenceNo: processJson.ReferenceNo || '',
+                processGroup: processJson.Group || '',
+                version: processJson.Version || '',
+                publishState: processJson.State || '',
+                objective: processJson.Objective || '',
+                background: processJson.Background || '',
+              }),
+              isCPS230Tagged,
+              tagArray,
+              inputs ? JSON.stringify(inputs) : null,
+              outputs ? JSON.stringify(outputs) : null,
+              triggers ? JSON.stringify(triggers) : null,
+              targets ? JSON.stringify(targets) : null,
+              userProfile.email,
+            ]
+          );
+
+          const processId = processResult.rows[0].id;
+
+          // Link systems to process via process_systems junction table
+          await client.query(
+            `DELETE FROM process_systems WHERE process_id = $1`,
+            [processId]
+          );
+
+          for (const systemTag of systemTags) {
+            try {
+              const systemResult = await client.query(
+                `SELECT id FROM systems WHERE pm_tag_id = $1 AND account_id IS NOT DISTINCT FROM $2`,
+                [systemTag.id, userProfile.account_id]
+              );
+
+              if (systemResult.rows.length > 0) {
+                const systemId = systemResult.rows[0].id;
+                await client.query(
+                  `INSERT INTO process_systems (process_id, system_id, modified_by)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (process_id, system_id) DO NOTHING`,
+                  [processId, systemId, userProfile.email]
+                );
+              }
+            } catch (systemLinkError) {
+              context.warn(`Failed to link system ${systemTag.name} to process ${processName}:`, systemLinkError);
+            }
+          }
+
+          context.log(`Successfully synced process: ${processName}`);
+          recordsSynced++;
+        } catch (error: any) {
+          context.error(`Error processing process ${processUniqueId}:`, error);
+          errors.push(`${processUniqueId}: ${error.message}`);
+        }
+      }
+
+      // Small delay between batches to avoid overwhelming the Nintex API
+      if (batchIndex < totalBatches - 1) {
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
 
-    // Update sync history with results
+    // Update sync history with final results
     await client.query(
       `UPDATE sync_history SET
         status = $1,
         records_synced = $2,
-        error_message = $3,
+        processed_count = $3,
+        error_message = $4,
         completed_at = NOW()
-      WHERE id = $4`,
+      WHERE id = $5`,
       [
         recordsSynced > 0 ? 'success' : 'failed',
         recordsSynced,
+        processUniqueIds.length,
         errors.length > 0 ? errors.join('; ') : null,
         syncHistoryId
       ]

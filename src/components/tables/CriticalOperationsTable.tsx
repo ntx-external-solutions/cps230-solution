@@ -97,32 +97,36 @@ export function CriticalOperationsTable() {
       },
     },
     {
-      id: 'system',
-      header: 'System',
+      id: 'systems',
+      header: 'Systems',
       cell: ({ row }) => {
-        const systemName = (row.original as any).system_name;
+        const systems = (row.original as any).systems as { id: string; system_name: string }[] | undefined;
         return (
-          <div className="text-sm">
-            {systemName ? (
-              <Badge variant="outline">{systemName}</Badge>
+          <div className="flex flex-wrap gap-1">
+            {systems && systems.length > 0 ? (
+              systems.map((s) => (
+                <Badge key={s.id} variant="outline">{s.system_name}</Badge>
+              ))
             ) : (
-              <span className="text-muted-foreground">—</span>
+              <span className="text-sm text-muted-foreground">—</span>
             )}
           </div>
         );
       },
     },
     {
-      id: 'process',
-      header: 'Process',
+      id: 'processes',
+      header: 'Processes',
       cell: ({ row }) => {
-        const processName = (row.original as any).process_name;
+        const processes = (row.original as any).processes as { id: string; process_name: string }[] | undefined;
         return (
-          <div className="text-sm">
-            {processName ? (
-              <Badge variant="outline">{processName}</Badge>
+          <div className="flex flex-wrap gap-1">
+            {processes && processes.length > 0 ? (
+              processes.map((p) => (
+                <Badge key={p.id} variant="outline">{p.process_name}</Badge>
+              ))
             ) : (
-              <span className="text-muted-foreground">—</span>
+              <span className="text-sm text-muted-foreground">—</span>
             )}
           </div>
         );
