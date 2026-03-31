@@ -62,15 +62,10 @@ export default function Settings() {
       setTenantId((settings.find(s => s.key === 'pm_tenant_id')?.value as string) || '');
       setSyncScope((settings.find(s => s.key === 'sync_scope')?.value as string) || 'cps230_only');
       setDashboardFiltersExpanded((settings.find(s => s.key === 'dashboard_filters_expanded')?.value as boolean) ?? false);
+      setAccountName((settings.find(s => s.key === 'organization_name')?.value as string) || '');
+      setIsLoadingAccount(false);
     }
   }, [settings]);
-
-  // Load account data - disabled for Azure AD implementation
-  useEffect(() => {
-    // Azure AD implementation doesn't use separate accounts table
-    // Account info is managed through Azure AD tenant
-    setIsLoadingAccount(false);
-  }, []);
 
   const handleSaveConnection = async () => {
     try {
@@ -114,12 +109,14 @@ export default function Settings() {
   };
 
   const handleUpdateAccount = async () => {
-    // Account management is handled through Azure AD tenant
-    // This functionality is not available in the Azure AD implementation
-    toast({
-      title: 'Not Available',
-      description: 'Account settings are managed through Azure AD. Contact your administrator.',
-    });
+    try {
+      await updateSettings.mutateAsync([
+        { key: 'organization_name', value: accountName.trim() },
+      ]);
+      toast.success('Account settings saved successfully');
+    } catch (error) {
+      toast.error('Failed to save account settings');
+    }
   };
 
   const handleToggleDashboardFilters = async (checked: boolean) => {

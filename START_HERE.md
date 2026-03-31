@@ -27,7 +27,7 @@ A complete, production-ready application for managing critical operations aligne
    # https://docs.microsoft.com/en-us/cli/azure/install-azure-cli
    ```
 
-3. **Node.js 20.x**
+3. **Node.js 24.x** (required for backend Azure Functions)
    ```bash
    # Check version
    node --version
@@ -105,7 +105,7 @@ Application URL: https://your-app-name.azurestaticapps.net
 
 The deployment script created:
 - **PostgreSQL Database** for all your data
-- **Azure Functions** for the backend API (17 serverless functions)
+- **Azure Functions** for the backend API (20 serverless functions)
 - **Static Web App** for the React frontend
 - **Key Vault** for secure secrets storage
 - **Application Insights** for monitoring and logs

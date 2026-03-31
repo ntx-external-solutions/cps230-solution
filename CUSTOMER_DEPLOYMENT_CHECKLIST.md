@@ -9,7 +9,7 @@
 - [ ] Correct subscription selected: `az account set --subscription "YOUR_SUBSCRIPTION"`
 
 ### Development Tools
-- [ ] Node.js 20.x installed: https://nodejs.org
+- [ ] Node.js 24.x installed: https://nodejs.org
 - [ ] Azure Functions Core Tools (optional): https://docs.microsoft.com/azure/azure-functions/functions-run-local
 - [ ] PostgreSQL client (psql) for database init
 

@@ -1,6 +1,7 @@
 import { ReactNode, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSettings } from '@/hooks/useSettings';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -30,6 +31,8 @@ export function AppLayout({ children }: AppLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { data: settings = [] } = useSettings(['organization_name']);
+  const organizationName = (settings.find(s => s.key === 'organization_name')?.value as string) || 'CPS230';
 
   const navigation: NavItem[] = [
     {
@@ -139,7 +142,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                   />
                 </svg>
               </div>
-              <span className="font-semibold text-sm">CPS230</span>
+              <span className="font-semibold text-sm">{organizationName}</span>
             </div>
           )}
           <button

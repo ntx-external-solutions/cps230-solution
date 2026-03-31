@@ -128,12 +128,12 @@ async function handleGet(
       [id]
     );
 
-    // Get associated controls
+    // Get associated controls (from control_processes junction table, where ControlDialog writes)
     const controlsResult = await query(
       `SELECT c.id, c.control_name
        FROM controls c
-       INNER JOIN process_controls pc ON pc.control_id = c.id
-       WHERE pc.process_id = $1`,
+       INNER JOIN control_processes cp ON cp.control_id = c.id
+       WHERE cp.process_id = $1`,
       [id]
     );
 
@@ -175,8 +175,8 @@ async function handleGet(
         const controlsResult = await query(
           `SELECT c.id, c.control_name
            FROM controls c
-           INNER JOIN process_controls pc ON pc.control_id = c.id
-           WHERE pc.process_id = $1`,
+           INNER JOIN control_processes cp ON cp.control_id = c.id
+           WHERE cp.process_id = $1`,
           [process.id]
         );
 
