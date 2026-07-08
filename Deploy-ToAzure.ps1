@@ -95,6 +95,19 @@ if ([string]::IsNullOrWhiteSpace($adminEmail)) {
     exit 1
 }
 
+# Azure AD SSO (optional). Leave blank to deploy with local authentication only.
+# These values are baked into the frontend at build time and set on the Function
+# App, so they must be collected before the frontend is built.
+$azureTenantId = Read-Host "Azure AD Tenant ID (optional, blank = local auth only)"
+$azureClientId = ""
+if (![string]::IsNullOrWhiteSpace($azureTenantId)) {
+    $azureClientId = Read-Host "Azure AD Client ID (App Registration)"
+    if ([string]::IsNullOrWhiteSpace($azureClientId)) {
+        Write-Host "ERROR: Client ID is required when a Tenant ID is provided" -ForegroundColor Red
+        exit 1
+    }
+}
+
 # Get GitHub repository URL (optional)
 try {
     $githubRepo = git config --get remote.origin.url 2>$null
@@ -112,6 +125,11 @@ Write-Host "Location: $location"
 Write-Host "Resource Group: $resourceGroup"
 Write-Host "Base Name: $baseName"
 Write-Host "Admin Email: $adminEmail"
+if ([string]::IsNullOrWhiteSpace($azureTenantId)) {
+    Write-Host "Azure AD SSO: not configured (local auth only)"
+} else {
+    Write-Host "Azure AD SSO: enabled (tenant $azureTenantId)"
+}
 Write-Host "GitHub Repo: $githubRepo"
 Write-Host ""
 
@@ -125,7 +143,7 @@ if ($confirm -ne "yes" -and $confirm -ne "y") {
 Write-Host "`n=== Starting Deployment ===" -ForegroundColor Blue
 
 # Step 1: Deploy Infrastructure
-Write-Host "`nStep 1/5: Deploying Azure Infrastructure..." -ForegroundColor Yellow
+Write-Host "`nStep 1/6: Deploying Azure Infrastructure..." -ForegroundColor Yellow
 $deploymentName = "cps230-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 
 $deploymentResult = az deployment sub create `
@@ -158,7 +176,7 @@ $staticWebAppUrl = $deploymentResult.properties.outputs.staticWebAppUrl.value
 $staticWebAppApiKey = $deploymentResult.properties.outputs.staticWebAppApiKey.value
 
 # Step 2: Initialize Database
-Write-Host "`nStep 2/5: Initializing Database Schema..." -ForegroundColor Yellow
+Write-Host "`nStep 2/6: Initializing Database Schema..." -ForegroundColor Yellow
 
 Write-Host "Waiting for PostgreSQL to be ready..."
 Start-Sleep -Seconds 30
@@ -187,7 +205,7 @@ Get-ChildItem -Path "database/migrations/*.sql" | ForEach-Object {
 Write-Host "✓ Database initialized successfully" -ForegroundColor Green
 
 # Step 3: Build and Deploy Backend
-Write-Host "`nStep 3/5: Building and Deploying Backend Functions..." -ForegroundColor Yellow
+Write-Host "`nStep 3/6: Building and Deploying Backend Functions..." -ForegroundColor Yellow
 
 Push-Location backend
 npm ci
@@ -205,29 +223,140 @@ az functionapp deployment source config-zip `
 
 Write-Host "✓ Backend deployed successfully" -ForegroundColor Green
 
-# Step 4: Build and Deploy Frontend
-Write-Host "`nStep 4/5: Building and Deploying Frontend..." -ForegroundColor Yellow
+# Step 4: Create Initial Admin User
+Write-Host "`nStep 4/6: Creating Initial Admin User..." -ForegroundColor Yellow
+
+$adminCreated = $false
+$env:PGPASSWORD = $postgresPasswordPlain
+$pgConn = "host=$postgresHost port=5432 dbname=$postgresDb user=cps230admin sslmode=require"
+
+# Only seed an admin when the users table is empty (matches deploy.sh behavior).
+$userCountRaw = (psql $pgConn -t -A -c "SELECT COUNT(*) FROM user_profiles;" 2>$null)
+$userCount = 0
+$countOk = ($LASTEXITCODE -eq 0) -and [int]::TryParse(($userCountRaw -replace '\D', ''), [ref]$userCount)
+
+if (-not $countOk) {
+    Write-Host "WARNING: Could not read existing users; skipping admin creation. Create one later with: .\Manage-Access.ps1 -Action NewAdmin" -ForegroundColor Yellow
+} elseif ($userCount -gt 0) {
+    Write-Host "Users already exist. Skipping initial admin creation." -ForegroundColor Yellow
+} else {
+    $adminFullName = "System Administrator"
+
+    # Generate a bcrypt hash using the backend's bcryptjs (installed in Step 3).
+    # The password is passed via an env var so it never lands in the command line,
+    # and hashSync avoids async-callback quoting headaches.
+    $env:ADMIN_PW = $postgresPasswordPlain
+    Push-Location backend
+    $passwordHash = (node -e "console.log(require('bcryptjs').hashSync(process.env.ADMIN_PW, 12))")
+    $hashExit = $LASTEXITCODE
+    Pop-Location
+    Remove-Item Env:\ADMIN_PW -ErrorAction SilentlyContinue
+
+    if ($hashExit -ne 0 -or [string]::IsNullOrWhiteSpace($passwordHash)) {
+        Write-Host "WARNING: Failed to generate password hash; skipping admin creation. Create one later with: .\Manage-Access.ps1 -Action NewAdmin" -ForegroundColor Yellow
+    } else {
+        # psql -v + :'var' produces properly-quoted SQL literals. This matters because
+        # the bcrypt hash contains '$' characters that PowerShell and SQL would otherwise
+        # try to interpret. Passing the raw value keeps it intact.
+        psql $pgConn `
+            -v "email=$adminEmail" `
+            -v "fullname=$adminFullName" `
+            -v "pwhash=$($passwordHash.Trim())" `
+            -c "INSERT INTO user_profiles (email, full_name, role, password_hash, auth_type) VALUES (:'email', :'fullname', 'promaster', :'pwhash', 'local') ON CONFLICT (email) DO NOTHING;" | Out-Null
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✓ Initial admin user created (role: promaster)" -ForegroundColor Green
+            $adminCreated = $true
+        } else {
+            Write-Host "WARNING: Failed to create initial admin user. Create one later with: .\Manage-Access.ps1 -Action NewAdmin" -ForegroundColor Yellow
+        }
+    }
+}
+
+# Step 5: Build and Deploy Frontend
+Write-Host "`nStep 5/6: Building and Deploying Frontend..." -ForegroundColor Yellow
+
+# Write build-time configuration. The VITE_* values are baked into the bundle by
+# Vite, so they MUST be present before 'npm run build'. Without VITE_AZURE_CLIENT_ID
+# the SPA sends an empty client_id to Azure AD and sign-in fails with AADSTS900144.
+Write-Host "Creating production environment configuration..."
+@(
+    "VITE_API_URL=https://$functionAppName.azurewebsites.net/api"
+    "VITE_AZURE_TENANT_ID=$azureTenantId"
+    "VITE_AZURE_CLIENT_ID=$azureClientId"
+    "VITE_REDIRECT_URI=$staticWebAppUrl"
+) | Set-Content -Path ".env.production" -Encoding utf8
 
 npm ci
+if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Frontend dependency install failed" -ForegroundColor Red; exit 1 }
 npm run build
+if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Frontend build failed" -ForegroundColor Red; exit 1 }
 
-# Deploy to Static Web App
+# Deploy to Static Web App. --env production is required; without it the SWA CLI
+# deploys to a preview environment and the production URL keeps the old content.
 $env:SWA_CLI_DEPLOYMENT_TOKEN = $staticWebAppApiKey
-npx "@azure/static-web-apps-cli" deploy `
+npx "@azure/static-web-apps-cli" deploy "dist" `
     --deployment-token $staticWebAppApiKey `
-    --app-location "." `
-    --output-location "dist" `
-    --no-use-keychain 2>&1 | Out-Null
+    --env production `
+    --no-use-keychain
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Frontend deployment failed" -ForegroundColor Red
+    exit 1
+}
 
 Write-Host "✓ Frontend deployed successfully" -ForegroundColor Green
 
-# Step 5: Post-deployment Configuration
-Write-Host "`nStep 5/5: Configuring Application Settings..." -ForegroundColor Yellow
+# Step 6: Post-deployment Configuration
+Write-Host "`nStep 6/6: Configuring Application Settings..." -ForegroundColor Yellow
 
 az functionapp cors add `
     --resource-group $resourceGroup `
     --name $functionAppName `
     --allowed-origins $staticWebAppUrl | Out-Null
+
+# Configure Azure AD SSO on the backend and App Registration (if provided).
+if (![string]::IsNullOrWhiteSpace($azureClientId)) {
+    Write-Host "Configuring Azure AD SSO..." -ForegroundColor Yellow
+
+    # Backend validates tokens against these. appsettings set merges, so other
+    # settings (connection string, etc.) are preserved.
+    az functionapp config appsettings set `
+        --name $functionAppName `
+        --resource-group $resourceGroup `
+        --settings AZURE_TENANT_ID=$azureTenantId AZURE_CLIENT_ID=$azureClientId `
+        --output none
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✓ Function App SSO settings configured" -ForegroundColor Green
+    } else {
+        Write-Host "WARNING: Failed to set Function App SSO settings" -ForegroundColor Yellow
+    }
+
+    # Register the site as a SPA redirect URI, preserving any existing ones.
+    $existingJson = az ad app show --id $azureClientId --query "spa.redirectUris" -o json 2>$null
+    $existing = @()
+    if (![string]::IsNullOrWhiteSpace($existingJson)) {
+        try { $existing = @($existingJson | ConvertFrom-Json) } catch { $existing = @() }
+    }
+    if ($existing -contains $staticWebAppUrl) {
+        Write-Host "✓ Redirect URI already configured" -ForegroundColor Green
+    } else {
+        $uris = @($existing + $staticWebAppUrl | Where-Object { $_ } | Select-Object -Unique)
+        $body = @{ spa = @{ redirectUris = $uris } } | ConvertTo-Json -Depth 5 -Compress
+        $tmp = New-TemporaryFile
+        Set-Content -Path $tmp -Value $body -Encoding utf8
+        az rest --method PATCH `
+            --uri "https://graph.microsoft.com/v1.0/applications(appId='$azureClientId')" `
+            --headers "Content-Type=application/json" `
+            --body "@$tmp" 2>$null
+        $patchExit = $LASTEXITCODE
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+        if ($patchExit -eq 0) {
+            Write-Host "✓ App Registration redirect URI configured" -ForegroundColor Green
+        } else {
+            Write-Host "WARNING: Could not update the App Registration. Add '$staticWebAppUrl' as a SPA redirect URI manually." -ForegroundColor Yellow
+        }
+    }
+}
 
 Write-Host "✓ Configuration completed" -ForegroundColor Green
 
@@ -246,6 +375,20 @@ Write-Host "Application URL:   " -NoNewline; Write-Host $staticWebAppUrl -Foregr
 Write-Host "Database Host:     " -NoNewline; Write-Host $postgresHost -ForegroundColor Green
 Write-Host "Function App:      " -NoNewline; Write-Host "$functionAppName.azurewebsites.net" -ForegroundColor Green
 Write-Host ""
+
+if ($adminCreated) {
+    Write-Host "=== Initial Admin Login (local auth) ===" -ForegroundColor Blue
+    Write-Host "Email:    " -NoNewline; Write-Host $adminEmail -ForegroundColor Green
+    Write-Host "Password: " -NoNewline; Write-Host "(the PostgreSQL admin password you entered)" -ForegroundColor Green
+    Write-Host "Role:     " -NoNewline; Write-Host "promaster (full admin)" -ForegroundColor Green
+    Write-Host "!  Change this password after first login." -ForegroundColor Yellow
+    Write-Host ""
+} else {
+    Write-Host "=== Admin Access ===" -ForegroundColor Blue
+    Write-Host "No local admin was seeded. Either the first Azure AD sign-in becomes admin," -ForegroundColor Yellow
+    Write-Host "or run: .\Manage-Access.ps1 -Action NewAdmin to create a local admin." -ForegroundColor Yellow
+    Write-Host ""
+}
 
 Write-Host "=== Next Steps ===" -ForegroundColor Yellow
 Write-Host "1. Navigate to: $staticWebAppUrl"
