@@ -37,11 +37,9 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
     [ValidateSet('NewAdmin', 'ConfigureSso')]
     [string]$Action,
 
-    [Parameter(Mandatory)]
     [string]$ResourceGroup,
 
     # --- NewAdmin parameters ---
@@ -109,6 +107,28 @@ function Assert-Prerequisites {
 
 # The repo root is wherever this script lives.
 $RepoRoot = $PSScriptRoot
+
+function Show-Usage {
+    Write-Host ""
+    Write-Host "Manage-Access.ps1 - CPS230 post-deployment access management" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "USAGE:" -ForegroundColor Yellow
+    Write-Host "  Create or reset a local admin user:"
+    Write-Host "    .\Manage-Access.ps1 -Action NewAdmin -ResourceGroup <rg> -Email <email>"
+    Write-Host ""
+    Write-Host "  Configure Azure AD SSO and redeploy the frontend:"
+    Write-Host "    .\Manage-Access.ps1 -Action ConfigureSso -ResourceGroup <rg> -TenantId <guid> -ClientId <guid>"
+    Write-Host ""
+    Write-Host "PARAMETERS:" -ForegroundColor Yellow
+    Write-Host "  -Action          NewAdmin | ConfigureSso   (required)"
+    Write-Host "  -ResourceGroup   Azure resource group name (required)"
+    Write-Host "  NewAdmin:        -Email, [-Password], [-PostgresPassword], [-Role], [-FullName]"
+    Write-Host "  ConfigureSso:    -TenantId, -ClientId, [-SkipFrontendRedeploy]"
+    Write-Host ""
+    Write-Host "Any required value not passed on the command line will be prompted for." -ForegroundColor DarkGray
+    Write-Host "Run 'Get-Help .\Manage-Access.ps1 -Full' for details." -ForegroundColor DarkGray
+    Write-Host ""
+}
 
 # ---------------------------------------------------------------------------
 # Action: NewAdmin
@@ -377,6 +397,17 @@ function Invoke-ConfigureSso {
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+if ([string]::IsNullOrWhiteSpace($Action)) {
+    Show-Usage
+    exit 0
+}
+
+if ([string]::IsNullOrWhiteSpace($ResourceGroup)) {
+    Write-Err "-ResourceGroup is required."
+    Show-Usage
+    exit 1
+}
+
 Assert-Prerequisites
 
 switch ($Action) {
