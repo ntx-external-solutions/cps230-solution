@@ -33,7 +33,7 @@
         -TenantId <tenant-guid> -ClientId <app-client-id> -SkipFrontendRedeploy
 #>
 
-#Requires -Version 7.0
+#Requires -Version 5.1
 
 [CmdletBinding()]
 param(
@@ -74,9 +74,24 @@ function Write-Warn { param([string]$Message) Write-Host "[WARN] $Message" -Fore
 function Write-Err  { param([string]$Message) Write-Host "[ERROR] $Message" -ForegroundColor Red }
 
 function ConvertTo-Plain {
+    # Works on both Windows PowerShell 5.1 and PowerShell 7
+    # (ConvertFrom-SecureString -AsPlainText is 7-only).
     param([securestring]$Secure)
     if ($null -eq $Secure) { return $null }
-    return ($Secure | ConvertFrom-SecureString -AsPlainText)
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+}
+
+function Write-Utf8NoBom {
+    # Set-Content -Encoding utf8 writes a BOM on 5.1, which corrupts .env files
+    # and JSON request bodies. Write UTF-8 without a BOM on every version.
+    param([string]$Path, [string[]]$Lines)
+    $content = ($Lines -join "`n") + "`n"
+    [System.IO.File]::WriteAllText($Path, $content, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Assert-Prerequisites {
@@ -287,11 +302,11 @@ function Invoke-ConfigureSso {
 
         # az rest reads the body from a file with '@' to avoid shell-quoting issues.
         $tmp = New-TemporaryFile
-        Set-Content -Path $tmp -Value $body -Encoding utf8
+        Write-Utf8NoBom -Path $tmp.FullName -Lines @($body)
         az rest --method PATCH `
             --uri "https://graph.microsoft.com/v1.0/applications(appId='$ClientId')" `
             --headers "Content-Type=application/json" `
-            --body "@$tmp" 2>$null
+            --body "@$($tmp.FullName)" 2>$null
         $patchExit = $LASTEXITCODE
         Remove-Item $tmp -ErrorAction SilentlyContinue
 
@@ -310,12 +325,12 @@ function Invoke-ConfigureSso {
     } else {
         Write-Info "Rebuilding frontend with SSO configuration..."
         $envFile = Join-Path $RepoRoot '.env.production'
-        @(
+        Write-Utf8NoBom -Path $envFile -Lines @(
             "VITE_API_URL=https://$FunctionAppName.azurewebsites.net/api"
             "VITE_AZURE_TENANT_ID=$TenantId"
             "VITE_AZURE_CLIENT_ID=$ClientId"
             "VITE_REDIRECT_URI=$swaUrl"
-        ) | Set-Content -Path $envFile -Encoding utf8
+        )
 
         Push-Location $RepoRoot
         try {

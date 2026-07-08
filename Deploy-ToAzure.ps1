@@ -21,12 +21,21 @@
     .\Deploy-ToAzure.ps1
 #>
 
-#Requires -Version 7.0
+#Requires -Version 5.1
 
 [CmdletBinding()]
 param()
 
 $ErrorActionPreference = "Stop"
+
+function Write-Utf8NoBom {
+    # Set-Content -Encoding utf8 writes a BOM on Windows PowerShell 5.1, which
+    # corrupts .env files and JSON request bodies. Write UTF-8 without a BOM on
+    # every version.
+    param([string]$Path, [string[]]$Lines)
+    $content = ($Lines -join "`n") + "`n"
+    [System.IO.File]::WriteAllText($Path, $content, (New-Object System.Text.UTF8Encoding($false)))
+}
 
 # Display banner
 Write-Host @"
@@ -280,12 +289,12 @@ Write-Host "`nStep 5/6: Building and Deploying Frontend..." -ForegroundColor Yel
 # Vite, so they MUST be present before 'npm run build'. Without VITE_AZURE_CLIENT_ID
 # the SPA sends an empty client_id to Azure AD and sign-in fails with AADSTS900144.
 Write-Host "Creating production environment configuration..."
-@(
+Write-Utf8NoBom -Path ".env.production" -Lines @(
     "VITE_API_URL=https://$functionAppName.azurewebsites.net/api"
     "VITE_AZURE_TENANT_ID=$azureTenantId"
     "VITE_AZURE_CLIENT_ID=$azureClientId"
     "VITE_REDIRECT_URI=$staticWebAppUrl"
-) | Set-Content -Path ".env.production" -Encoding utf8
+)
 
 npm ci
 if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Frontend dependency install failed" -ForegroundColor Red; exit 1 }
@@ -343,11 +352,11 @@ if (![string]::IsNullOrWhiteSpace($azureClientId)) {
         $uris = @($existing + $staticWebAppUrl | Where-Object { $_ } | Select-Object -Unique)
         $body = @{ spa = @{ redirectUris = $uris } } | ConvertTo-Json -Depth 5 -Compress
         $tmp = New-TemporaryFile
-        Set-Content -Path $tmp -Value $body -Encoding utf8
+        Write-Utf8NoBom -Path $tmp.FullName -Lines @($body)
         az rest --method PATCH `
             --uri "https://graph.microsoft.com/v1.0/applications(appId='$azureClientId')" `
             --headers "Content-Type=application/json" `
-            --body "@$tmp" 2>$null
+            --body "@$($tmp.FullName)" 2>$null
         $patchExit = $LASTEXITCODE
         Remove-Item $tmp -ErrorAction SilentlyContinue
         if ($patchExit -eq 0) {
