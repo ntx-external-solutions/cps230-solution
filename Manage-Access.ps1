@@ -220,20 +220,29 @@ function Invoke-NewAdmin {
     # Upsert. ON CONFLICT lets this both create a first admin and reset an
     # existing user's password/role. psql -v + :'var' quotes each value safely,
     # which matters because the bcrypt hash contains '$' characters.
+    #
+    # The SQL is run via -f (a file), NOT -c: psql only performs :'var'
+    # interpolation when reading from a file or stdin. With -c the ':' is sent
+    # to the server verbatim and fails with "syntax error at or near \":\"".
     Write-Info "Writing user '$Email' (role: $Role)..."
+    $sqlFile = New-TemporaryFile
+    Write-Utf8NoBom -Path $sqlFile.FullName -Lines @(
+        "INSERT INTO user_profiles (email, full_name, role, password_hash, auth_type)"
+        "VALUES (:'email', :'fullname', :'role', :'pwhash', 'local')"
+        "ON CONFLICT (email) DO UPDATE"
+        "SET password_hash = EXCLUDED.password_hash,"
+        "    role          = EXCLUDED.role,"
+        "    auth_type     = 'local';"
+    )
     psql $pgConn `
         -v "email=$Email" `
         -v "fullname=$FullName" `
         -v "pwhash=$($passwordHash.Trim())" `
         -v "role=$Role" `
-        -c "INSERT INTO user_profiles (email, full_name, role, password_hash, auth_type)
-            VALUES (:'email', :'fullname', :'role', :'pwhash', 'local')
-            ON CONFLICT (email) DO UPDATE
-            SET password_hash = EXCLUDED.password_hash,
-                role          = EXCLUDED.role,
-                auth_type     = 'local';" | Out-Null
+        -f $sqlFile.FullName | Out-Null
     $insertExit = $LASTEXITCODE
 
+    Remove-Item $sqlFile -ErrorAction SilentlyContinue
     Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
 
     if ($insertExit -ne 0) {

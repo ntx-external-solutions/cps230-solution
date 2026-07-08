@@ -267,11 +267,21 @@ if (-not $countOk) {
         # psql -v + :'var' produces properly-quoted SQL literals. This matters because
         # the bcrypt hash contains '$' characters that PowerShell and SQL would otherwise
         # try to interpret. Passing the raw value keeps it intact.
+        #
+        # Run via -f (a file), NOT -c: psql only interpolates :'var' when reading
+        # from a file or stdin. With -c the ':' reaches the server verbatim and
+        # fails with "syntax error at or near \":\"".
+        $adminSqlFile = New-TemporaryFile
+        Write-Utf8NoBom -Path $adminSqlFile.FullName -Lines @(
+            "INSERT INTO user_profiles (email, full_name, role, password_hash, auth_type)"
+            "VALUES (:'email', :'fullname', 'promaster', :'pwhash', 'local')"
+            "ON CONFLICT (email) DO NOTHING;"
+        )
         psql $pgConn `
             -v "email=$adminEmail" `
             -v "fullname=$adminFullName" `
             -v "pwhash=$($passwordHash.Trim())" `
-            -c "INSERT INTO user_profiles (email, full_name, role, password_hash, auth_type) VALUES (:'email', :'fullname', 'promaster', :'pwhash', 'local') ON CONFLICT (email) DO NOTHING;" | Out-Null
+            -f $adminSqlFile.FullName | Out-Null
 
         if ($LASTEXITCODE -eq 0) {
             Write-Host "✓ Initial admin user created (role: promaster)" -ForegroundColor Green
