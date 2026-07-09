@@ -36,7 +36,9 @@ param tags object = {}
 param runtime string = 'node'
 
 @description('Runtime version')
-param runtimeVersion string = '20'
+// Node 22 (active LTS, GA on the Linux Consumption/Y1 plan). Node 20 is EOL and
+// Node 24 is not reliably supported on classic Linux Consumption yet.
+param runtimeVersion string = '22'
 
 @description('SKU name for App Service Plan')
 @allowed([

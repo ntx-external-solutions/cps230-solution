@@ -115,7 +115,7 @@ module functionApp 'modules/functionapp.bicep' = {
     managedIdentityPrincipalId: ''
     tags: tags
     runtime: 'node'
-    runtimeVersion: '20'
+    runtimeVersion: '22'
     // Cost-optimized: Y1 Consumption (~$0-10/mo) vs Enterprise: EP1 (~$150/mo)
     skuName: costOptimized ? 'Y1' : (environmentName == 'prod' ? 'EP1' : 'Y1')
   }
