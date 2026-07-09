@@ -192,10 +192,14 @@ Start-Sleep -Seconds 30
 
 # Add current IP to firewall
 $currentIp = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing).Content
-Write-Host "Adding IP $currentIp to PostgreSQL firewall..."
+# The Bicep names the server psql-<base>-<env>-<uniqueSuffix>, not "<base>-<env>".
+# Derive the real name from the FQDN (its first label) so the rule targets the
+# server that actually exists.
+$postgresServerName = $postgresHost.Split('.')[0]
+Write-Host "Adding IP $currentIp to PostgreSQL firewall ($postgresServerName)..."
 az postgres flexible-server firewall-rule create `
     --resource-group $resourceGroup `
-    --name "$baseName-$environment" `
+    --name $postgresServerName `
     --rule-name "DeploymentScript" `
     --start-ip-address $currentIp `
     --end-ip-address $currentIp | Out-Null
@@ -219,11 +223,23 @@ Write-Host "`nStep 3/6: Building and Deploying Backend Functions..." -Foreground
 Push-Location backend
 npm ci
 npm run build
+# Strip dev dependencies before packaging. Left in, node_modules is ~1.5 GB
+# (it includes the whole dev toolchain), which makes the zip huge and the
+# config-zip upload slow or prone to timing out. Production deps only is ~10-15 MB.
+npm prune --production
 Pop-Location
 
-# Create backend zip
+# Create backend zip (exclude TypeScript sources and sourcemaps; only the
+# built dist + production node_modules are needed at runtime)
 if (Test-Path "backend.zip") { Remove-Item "backend.zip" }
-Compress-Archive -Path "backend/*" -DestinationPath "backend.zip"
+$zipStaging = Join-Path ([System.IO.Path]::GetTempPath()) "cps230-backend-zip"
+if (Test-Path $zipStaging) { Remove-Item $zipStaging -Recurse -Force }
+New-Item -ItemType Directory -Path $zipStaging | Out-Null
+Copy-Item "backend/host.json","backend/package.json" $zipStaging
+Copy-Item "backend/dist" $zipStaging -Recurse
+Copy-Item "backend/node_modules" $zipStaging -Recurse
+Compress-Archive -Path "$zipStaging/*" -DestinationPath "backend.zip"
+Remove-Item $zipStaging -Recurse -Force
 
 az functionapp deployment source config-zip `
     --resource-group $resourceGroup `

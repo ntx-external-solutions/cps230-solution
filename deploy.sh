@@ -186,6 +186,28 @@ print_info "Function App: $FUNCTION_APP_NAME"
 print_info "Static Web App: $STATIC_WEB_APP_NAME"
 print_info "Web App URL: $STATIC_WEB_APP_URL"
 
+# Allow this machine to reach PostgreSQL for schema init.
+# The Bicep only opens the server to Azure services (0.0.0.0); the schema and
+# initial-admin scripts below run psql from THIS machine, so without a firewall
+# rule for the current public IP they fail with "Failed to connect".
+print_section "Configuring Database Firewall"
+POSTGRES_SERVER_NAME="${POSTGRES_FQDN%%.*}"
+CURRENT_IP=$(curl -s https://api.ipify.org)
+if [ -n "$CURRENT_IP" ]; then
+    print_info "Adding deployment machine IP ($CURRENT_IP) to PostgreSQL firewall..."
+    az postgres flexible-server firewall-rule create \
+        --resource-group "$RESOURCE_GROUP" \
+        --name "$POSTGRES_SERVER_NAME" \
+        --rule-name "deploy-machine" \
+        --start-ip-address "$CURRENT_IP" \
+        --end-ip-address "$CURRENT_IP" \
+        --output none 2>/dev/null \
+        && print_info "Firewall rule added" \
+        || print_warning "Could not add firewall rule; database init may fail to connect"
+else
+    print_warning "Could not determine public IP; database init may fail to connect"
+fi
+
 # Initialize database
 print_section "Initializing Database"
 
@@ -201,7 +223,15 @@ if command -v psql &> /dev/null; then
     if [ $? -eq 0 ]; then
         print_info "Database initialized successfully"
 
-        # Create initial admin user
+        # Create initial admin user.
+        # create-initial-admin.sh hashes the password with the backend's bcryptjs,
+        # so backend dependencies must be installed BEFORE this runs (the main
+        # backend `npm install` happens later in the script).
+        if [ ! -d backend/node_modules/bcryptjs ]; then
+            print_info "Installing backend dependencies (required for admin creation)..."
+            (cd backend && npm install)
+        fi
+
         print_info "Creating initial admin user..."
         export ADMIN_EMAIL="$ADMIN_EMAIL"
         export ADMIN_PASSWORD="$POSTGRES_PASSWORD"
@@ -336,6 +366,12 @@ npm install
 
 print_info "Building backend..."
 npm run build
+
+# Strip dev dependencies before publishing so we don't upload the entire dev
+# toolchain (jest, ts-jest, etc.). This keeps the deployment package small
+# (~10-15 MB) and avoids slow/failed uploads over constrained connections.
+print_info "Pruning to production dependencies for a lean deployment package..."
+npm prune --production
 
 print_info "Deploying to Azure Functions..."
 if command -v func &> /dev/null; then
