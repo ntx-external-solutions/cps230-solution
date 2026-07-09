@@ -373,21 +373,50 @@ npm run build
 print_info "Pruning to production dependencies for a lean deployment package..."
 npm prune --production
 
-print_info "Deploying to Azure Functions..."
-if command -v func &> /dev/null; then
-    func azure functionapp publish "$FUNCTION_APP_NAME" --typescript
-    if [ $? -eq 0 ]; then
-        print_info "Backend deployed successfully"
-    else
-        print_error "Backend deployment failed"
-    fi
-else
-    print_warning "Azure Functions Core Tools not found. Skipping automatic backend deployment."
-    print_info "Install from: https://docs.microsoft.com/en-us/azure/azure-functions/functions-run-local"
-    print_info "Then run: func azure functionapp publish $FUNCTION_APP_NAME"
-fi
+print_info "Packaging backend..."
+# Package the built app (host.json + package.json + dist + production node_modules)
+# with host.json at the zip root, as the Functions host expects.
+rm -f ../backend.zip
+zip -r -q ../backend.zip host.json package.json dist node_modules -x "*.ts" -x "*.js.map"
 
 cd ..
+
+# Deploy the backend by uploading the package to the Function App's storage
+# account and pointing the app at it via WEBSITE_RUN_FROM_PACKAGE.
+#
+# We deliberately DON'T use `func azure functionapp publish` or
+# `az functionapp deployment source config-zip`: both push straight to the
+# Kudu/SCM endpoint, which frequently times out on slower uplinks ("write
+# operation timed out" / stalled uploads). Uploading to blob storage is chunked
+# and retryable, and this method needs no Azure Functions Core Tools installed.
+print_info "Deploying backend via storage package (WEBSITE_RUN_FROM_PACKAGE)..."
+STORAGE_ACCOUNT=$(az storage account list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)
+if [ -z "$STORAGE_ACCOUNT" ]; then
+    print_error "Could not find the Function App storage account; skipping backend deployment"
+    print_warning "You can deploy manually later with: func azure functionapp publish $FUNCTION_APP_NAME --typescript"
+else
+    STORAGE_KEY=$(az storage account keys list --account-name "$STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query "[0].value" -o tsv)
+    az storage container create --name deployments --account-name "$STORAGE_ACCOUNT" --account-key "$STORAGE_KEY" --output none
+
+    print_info "Uploading backend package to blob storage..."
+    az storage blob upload --account-name "$STORAGE_ACCOUNT" --account-key "$STORAGE_KEY" \
+        --container-name deployments --name backend.zip --file backend.zip \
+        --overwrite --max-connections 4 --output none
+
+    # Long-lived read SAS (run-from-package needs ongoing access to the blob).
+    SAS_EXPIRY=$(date -u -v+1095d '+%Y-%m-%dT%H:%MZ' 2>/dev/null || date -u -d '+1095 days' '+%Y-%m-%dT%H:%MZ')
+    SAS_TOKEN=$(az storage blob generate-sas --account-name "$STORAGE_ACCOUNT" --account-key "$STORAGE_KEY" \
+        --container-name deployments --name backend.zip --permissions r --expiry "$SAS_EXPIRY" --https-only -o tsv)
+    PACKAGE_URL="https://$STORAGE_ACCOUNT.blob.core.windows.net/deployments/backend.zip?$SAS_TOKEN"
+
+    az functionapp config appsettings set --name "$FUNCTION_APP_NAME" --resource-group "$RESOURCE_GROUP" \
+        --settings WEBSITE_RUN_FROM_PACKAGE="$PACKAGE_URL" --output none
+
+    print_info "Restarting Function App to mount the package..."
+    az functionapp restart --name "$FUNCTION_APP_NAME" --resource-group "$RESOURCE_GROUP" --output none
+    rm -f backend.zip
+    print_info "Backend deployed (functions become live ~1-2 minutes after the restart)"
+fi
 
 # Deploy frontend
 print_section "Deploying Frontend Application"

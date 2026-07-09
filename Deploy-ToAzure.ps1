@@ -241,12 +241,36 @@ Copy-Item "backend/node_modules" $zipStaging -Recurse
 Compress-Archive -Path "$zipStaging/*" -DestinationPath "backend.zip"
 Remove-Item $zipStaging -Recurse -Force
 
-az functionapp deployment source config-zip `
-    --resource-group $resourceGroup `
-    --name $functionAppName `
-    --src backend.zip | Out-Null
+# Deploy the backend by uploading the package to the Function App's storage
+# account and pointing the app at it via WEBSITE_RUN_FROM_PACKAGE.
+#
+# We deliberately avoid `az functionapp deployment source config-zip` and
+# `func azure functionapp publish`: both push to the Kudu/SCM endpoint, which
+# frequently times out on slower uplinks ("write operation timed out"). Uploading
+# to blob storage is chunked and retryable, and needs no Functions Core Tools.
+Write-Host "Deploying backend via storage package (WEBSITE_RUN_FROM_PACKAGE)..." -ForegroundColor Yellow
+$storageAccount = az storage account list --resource-group $resourceGroup --query "[0].name" -o tsv
+$storageKey = az storage account keys list --account-name $storageAccount --resource-group $resourceGroup --query "[0].value" -o tsv
+az storage container create --name deployments --account-name $storageAccount --account-key $storageKey --output none
 
-Write-Host "✓ Backend deployed successfully" -ForegroundColor Green
+Write-Host "Uploading backend package to blob storage..."
+az storage blob upload --account-name $storageAccount --account-key $storageKey `
+    --container-name deployments --name backend.zip --file backend.zip `
+    --overwrite --max-connections 4 --output none
+
+# Long-lived read SAS (run-from-package needs ongoing access to the blob).
+$sasExpiry = (Get-Date).ToUniversalTime().AddYears(3).ToString("yyyy-MM-ddTHH:mmZ")
+$sasToken = az storage blob generate-sas --account-name $storageAccount --account-key $storageKey `
+    --container-name deployments --name backend.zip --permissions r --expiry $sasExpiry --https-only -o tsv
+$packageUrl = "https://$storageAccount.blob.core.windows.net/deployments/backend.zip?$sasToken"
+
+az functionapp config appsettings set --name $functionAppName --resource-group $resourceGroup `
+    --settings WEBSITE_RUN_FROM_PACKAGE=$packageUrl --output none
+Write-Host "Restarting Function App to mount the package..."
+az functionapp restart --name $functionAppName --resource-group $resourceGroup --output none
+Remove-Item "backend.zip" -ErrorAction SilentlyContinue
+
+Write-Host "✓ Backend deployed successfully (live ~1-2 min after restart)" -ForegroundColor Green
 
 # Step 4: Create Initial Admin User
 Write-Host "`nStep 4/6: Creating Initial Admin User..." -ForegroundColor Yellow
