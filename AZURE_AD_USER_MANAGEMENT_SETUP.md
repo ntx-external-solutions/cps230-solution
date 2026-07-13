@@ -1,5 +1,12 @@
 # Azure AD User Management Setup Guide
 
+> **Not applicable to external-tenant SSO deployments.** This guide covers the
+> single-tenant model where the app creates/manages users *inside its own Azure
+> AD tenant* via Microsoft Graph. When users sign in from a **separate** tenant
+> (the app hosted apart from the users' directory), in-app AAD user provisioning
+> is disabled (`ENABLE_AAD_USER_MANAGEMENT=false`) — those users are managed by
+> their own tenant's admins. See **[EXTERNAL_TENANT_SSO_SETUP.md](EXTERNAL_TENANT_SSO_SETUP.md)**.
+
 ## Overview
 
 This guide explains how to set up dual authentication for your CPS230 application:

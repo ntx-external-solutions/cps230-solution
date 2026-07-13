@@ -3,15 +3,23 @@
     CPS230 Solution - Post-deployment access management (PowerShell)
 
 .DESCRIPTION
-    Standalone helper for two common post-deployment tasks:
+    Standalone helper for common post-deployment tasks:
 
-      * NewAdmin      Create (or reset) a local username/password admin user
-                      directly in the PostgreSQL database.
+      * NewAdmin         Create (or reset) a local username/password admin user
+                         directly in the PostgreSQL database.
 
-      * ConfigureSso  Wire up Azure AD single sign-on for an already-deployed
-                      environment: set the Function App settings, register the
-                      site's redirect URI on the App Registration, and rebuild
-                      + redeploy the frontend so the VITE_* values are baked in.
+      * PrintConsentUrl  Print the SSO tenant admin-consent URL for an already-
+                         configured environment (auto-discovers the tenant/client
+                         from the Function App settings). Hand it to a Global
+                         Administrator of the users' tenant.
+
+      * ConfigureSso  Wire up external-tenant Azure AD single sign-on for an
+                      already-deployed environment: set the Function App settings,
+                      mark the host App Registration multi-tenant, register the
+                      site's redirect URI, rebuild + redeploy the frontend so the
+                      VITE_* values are baked in, and print the SSO-tenant admin
+                      consent URL. -TenantId is the SSO (users') tenant;
+                      -ClientId is the App Registration in the host tenant.
 
     This does not require re-running the full deployment.
 
@@ -37,7 +45,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('NewAdmin', 'ConfigureSso')]
+    [ValidateSet('NewAdmin', 'ConfigureSso', 'PrintConsentUrl')]
     [string]$Action,
 
     [string]$ResourceGroup,
@@ -54,8 +62,11 @@ param(
     [string]$PostgresHost,
 
     # --- ConfigureSso parameters ---
+    # TenantId is the SSO (users') tenant; ClientId is the App Registration in the
+    # HOST tenant. See the external-tenant SSO guide for the distinction.
     [string]$TenantId,
     [string]$ClientId,
+    [string]$InitialPromasterEmails,
     [string]$FunctionAppName,
     [string]$StaticWebAppName,
     [switch]$SkipFrontendRedeploy
@@ -119,11 +130,15 @@ function Show-Usage {
     Write-Host "  Configure Azure AD SSO and redeploy the frontend:"
     Write-Host "    .\Manage-Access.ps1 -Action ConfigureSso -ResourceGroup <rg> -TenantId <guid> -ClientId <guid>"
     Write-Host ""
+    Write-Host "  Print the SSO admin-consent URL (for the users' tenant admin):"
+    Write-Host "    .\Manage-Access.ps1 -Action PrintConsentUrl -ResourceGroup <rg>"
+    Write-Host ""
     Write-Host "PARAMETERS:" -ForegroundColor Yellow
-    Write-Host "  -Action          NewAdmin | ConfigureSso   (required)"
+    Write-Host "  -Action          NewAdmin | ConfigureSso | PrintConsentUrl   (required)"
     Write-Host "  -ResourceGroup   Azure resource group name (required)"
     Write-Host "  NewAdmin:        -Email, [-Password], [-PostgresPassword], [-Role], [-FullName]"
-    Write-Host "  ConfigureSso:    -TenantId, -ClientId, [-SkipFrontendRedeploy]"
+    Write-Host "  ConfigureSso:    -TenantId (SSO/users tenant), -ClientId (host app),"
+    Write-Host "                   [-InitialPromasterEmails], [-SkipFrontendRedeploy]"
     Write-Host ""
     Write-Host "Any required value not passed on the command line will be prompted for." -ForegroundColor DarkGray
     Write-Host "Run 'Get-Help .\Manage-Access.ps1 -Full' for details." -ForegroundColor DarkGray
@@ -262,13 +277,18 @@ function Invoke-NewAdmin {
 # Action: ConfigureSso
 # ---------------------------------------------------------------------------
 function Invoke-ConfigureSso {
-    Write-Step "Configure Azure AD SSO"
+    Write-Step "Configure External-Tenant SSO"
 
-    if ([string]::IsNullOrWhiteSpace($TenantId)) { $script:TenantId = Read-Host "Azure AD Tenant ID" }
-    if ([string]::IsNullOrWhiteSpace($ClientId)) { $script:ClientId = Read-Host "Azure AD Client ID (App Registration)" }
+    Write-Info "TenantId = the SSO (users') Entra directory; ClientId = the App"
+    Write-Info "Registration in the HOST tenant (where the app is deployed)."
+    if ([string]::IsNullOrWhiteSpace($TenantId)) { $script:TenantId = Read-Host "SSO (users') Directory (tenant) ID" }
+    if ([string]::IsNullOrWhiteSpace($ClientId)) { $script:ClientId = Read-Host "Host App Registration - Application (client) ID" }
     if ([string]::IsNullOrWhiteSpace($TenantId) -or [string]::IsNullOrWhiteSpace($ClientId)) {
         Write-Err "Both -TenantId and -ClientId are required."
         exit 1
+    }
+    if ($PSBoundParameters.ContainsKey('InitialPromasterEmails') -eq $false -and [string]::IsNullOrWhiteSpace($InitialPromasterEmails)) {
+        $script:InitialPromasterEmails = Read-Host "Initial promaster email(s), comma-separated (blank = assign via local admin)"
     }
 
     # Discover the Function App and Static Web App if not provided.
@@ -302,11 +322,14 @@ function Invoke-ConfigureSso {
 
     # 1) Backend settings. appsettings set merges — existing keys (JWT_SECRET,
     #    connection string, etc.) are preserved.
+    #      AZURE_TENANT_ID            = the SSO (users') tenant, used to validate tokens
+    #      INITIAL_PROMASTER_EMAILS   = who becomes admin on first SSO login
+    #      ENABLE_AAD_USER_MANAGEMENT = off; users are managed in their own tenant
     Write-Info "Setting Function App SSO settings..."
     az functionapp config appsettings set `
         --name $FunctionAppName `
         --resource-group $ResourceGroup `
-        --settings AZURE_TENANT_ID=$TenantId AZURE_CLIENT_ID=$ClientId `
+        --settings AZURE_TENANT_ID=$TenantId AZURE_CLIENT_ID=$ClientId INITIAL_PROMASTER_EMAILS=$InitialPromasterEmails ENABLE_AAD_USER_MANAGEMENT=false `
         --output none
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Failed to update Function App settings."
@@ -314,7 +337,29 @@ function Invoke-ConfigureSso {
     }
     Write-Info "Function App settings updated."
 
-    # 2) Register the SPA redirect URI on the App Registration, preserving any
+    # 2) Ensure the App Registration is multi-tenant so users from the SSO tenant
+    #    can sign in (otherwise Azure rejects them: AADSTS50020 / AADSTS700016).
+    $currentAudience = az ad app show --id $ClientId --query "signInAudience" -o tsv 2>$null
+    if ($currentAudience -eq "AzureADMultipleOrgs" -or $currentAudience -eq "AzureADandPersonalMicrosoftAccount") {
+        Write-Info "App Registration is already multi-tenant ($currentAudience)."
+    } else {
+        Write-Info "Setting App Registration to multi-tenant..."
+        $audienceTmp = New-TemporaryFile
+        Write-Utf8NoBom -Path $audienceTmp.FullName -Lines @('{"signInAudience": "AzureADMultipleOrgs"}')
+        az rest --method PATCH `
+            --uri "https://graph.microsoft.com/v1.0/applications(appId='$ClientId')" `
+            --headers "Content-Type=application/json" `
+            --body "@$($audienceTmp.FullName)" 2>$null
+        $audienceExit = $LASTEXITCODE
+        Remove-Item $audienceTmp -ErrorAction SilentlyContinue
+        if ($audienceExit -eq 0) {
+            Write-Info "App Registration set to multi-tenant (AzureADMultipleOrgs)."
+        } else {
+            Write-Warn "Could not set multi-tenant flag. In the Azure Portal set 'Supported account types' to 'Accounts in any organizational directory'."
+        }
+    }
+
+    # 3) Register the SPA redirect URI on the App Registration, preserving any
     #    that are already there.
     Write-Info "Registering SPA redirect URI on the App Registration..."
     $existingJson = az ad app show --id $ClientId --query "spa.redirectUris" -o json 2>$null
@@ -347,7 +392,7 @@ function Invoke-ConfigureSso {
         }
     }
 
-    # 3) Rebuild + redeploy the frontend so the VITE_* values are baked in.
+    # 4) Rebuild + redeploy the frontend so the VITE_* values are baked in.
     if ($SkipFrontendRedeploy) {
         Write-Warn "Skipping frontend rebuild (-SkipFrontendRedeploy)."
         Write-Warn "SSO won't work in the browser until the frontend is rebuilt with the new VITE_AZURE_* values."
@@ -397,10 +442,68 @@ function Invoke-ConfigureSso {
         Write-Info "Frontend redeployed."
     }
 
+    $adminConsentUrl = "https://login.microsoftonline.com/$TenantId/adminconsent?client_id=$ClientId&redirect_uri=$swaUrl"
+
     Write-Host ""
     Write-Info "SSO configuration complete."
     Write-Host "  Sign-in URL: $swaUrl"
-    Write-Warn "The first Azure AD user to sign in becomes a Promaster (admin)."
+    Write-Host ""
+    Write-Warn "ACTION REQUIRED in the SSO (users') tenant ($TenantId):"
+    Write-Warn "A Global Administrator there must open the consent URL below once to"
+    Write-Warn "create the Enterprise App, or users can't sign in (AADSTS65001)."
+    Write-Host "  $adminConsentUrl" -ForegroundColor Green
+    if (-not [string]::IsNullOrWhiteSpace($InitialPromasterEmails)) {
+        Write-Info "Promaster on first login: $InitialPromasterEmails"
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Action: PrintConsentUrl
+# ---------------------------------------------------------------------------
+function Invoke-PrintConsentUrl {
+    Write-Step "SSO Admin-Consent URL"
+
+    # Discover the Function App and read the SSO settings the deploy wrote, so the
+    # admin doesn't have to remember the tenant/client IDs.
+    if ([string]::IsNullOrWhiteSpace($FunctionAppName)) {
+        Write-Info "Discovering Function App in '$ResourceGroup'..."
+        $script:FunctionAppName = az functionapp list --resource-group $ResourceGroup --query "[0].name" -o tsv 2>$null
+    }
+    if ([string]::IsNullOrWhiteSpace($FunctionAppName)) {
+        Write-Err "Could not find a Function App in '$ResourceGroup'. Pass -FunctionAppName explicitly."
+        exit 1
+    }
+
+    if ([string]::IsNullOrWhiteSpace($TenantId)) {
+        $script:TenantId = az functionapp config appsettings list --name $FunctionAppName --resource-group $ResourceGroup `
+            --query "[?name=='AZURE_TENANT_ID'].value | [0]" -o tsv 2>$null
+    }
+    if ([string]::IsNullOrWhiteSpace($ClientId)) {
+        $script:ClientId = az functionapp config appsettings list --name $FunctionAppName --resource-group $ResourceGroup `
+            --query "[?name=='AZURE_CLIENT_ID'].value | [0]" -o tsv 2>$null
+    }
+    $appUrl = az functionapp config appsettings list --name $FunctionAppName --resource-group $ResourceGroup `
+        --query "[?name=='STATIC_WEB_APP_URL'].value | [0]" -o tsv 2>$null
+
+    if ([string]::IsNullOrWhiteSpace($TenantId) -or [string]::IsNullOrWhiteSpace($ClientId)) {
+        Write-Err "SSO is not configured (AZURE_TENANT_ID / AZURE_CLIENT_ID are empty)."
+        Write-Warn "Configure SSO first: .\Manage-Access.ps1 -Action ConfigureSso -ResourceGroup $ResourceGroup"
+        exit 1
+    }
+
+    $adminConsentUrl = "https://login.microsoftonline.com/$TenantId/adminconsent?client_id=$ClientId&redirect_uri=$appUrl"
+
+    Write-Host ""
+    Write-Info "SSO (users') tenant:   $TenantId"
+    Write-Info "Host App Registration: $ClientId"
+    Write-Info "Redirect URI:          $appUrl"
+    Write-Host ""
+    Write-Host "A Global Administrator of the SSO tenant must open this URL once to create" -ForegroundColor Yellow
+    Write-Host "the Enterprise App so that tenant's users can sign in:" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  $adminConsentUrl" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Until consent is granted, users see 'need admin approval' (AADSTS65001)." -ForegroundColor DarkGray
 }
 
 # ---------------------------------------------------------------------------
@@ -420,6 +523,7 @@ if ([string]::IsNullOrWhiteSpace($ResourceGroup)) {
 Assert-Prerequisites
 
 switch ($Action) {
-    'NewAdmin'     { Invoke-NewAdmin }
-    'ConfigureSso' { Invoke-ConfigureSso }
+    'NewAdmin'        { Invoke-NewAdmin }
+    'ConfigureSso'    { Invoke-ConfigureSso }
+    'PrintConsentUrl' { Invoke-PrintConsentUrl }
 }

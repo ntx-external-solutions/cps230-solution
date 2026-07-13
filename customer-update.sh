@@ -251,6 +251,96 @@ fi
 
 cd ..
 
+# Reconcile external-tenant SSO configuration.
+#
+# Older instances were configured for single-tenant SSO (app and users in the
+# same tenant) and predate the INITIAL_PROMASTER_EMAILS / ENABLE_AAD_USER_MANAGEMENT
+# settings and the multi-tenant app registration. This step brings an existing
+# deployment up to the external-tenant model without a full redeploy. It runs
+# BEFORE the frontend rebuild below so any change to the SSO tenant is baked into
+# the new frontend bundle.
+print_section "Reconciling SSO Configuration"
+
+ADMIN_CONSENT_URL=""
+
+SSO_SETTINGS=$(az functionapp config appsettings list \
+    --name "$FUNCTION_APP_NAME" \
+    --resource-group "$RESOURCE_GROUP" \
+    --query "[?name=='AZURE_TENANT_ID' || name=='AZURE_CLIENT_ID' || name=='INITIAL_PROMASTER_EMAILS' || name=='ENABLE_AAD_USER_MANAGEMENT' || name=='STATIC_WEB_APP_URL'].{name:name, value:value}" \
+    --output json)
+
+CUR_TENANT=$(echo "$SSO_SETTINGS" | jq -r '.[] | select(.name=="AZURE_TENANT_ID") | .value')
+CUR_CLIENT=$(echo "$SSO_SETTINGS" | jq -r '.[] | select(.name=="AZURE_CLIENT_ID") | .value')
+CUR_PROMASTERS=$(echo "$SSO_SETTINGS" | jq -r '.[] | select(.name=="INITIAL_PROMASTER_EMAILS") | .value')
+CUR_AAD_MGMT=$(echo "$SSO_SETTINGS" | jq -r '.[] | select(.name=="ENABLE_AAD_USER_MANAGEMENT") | .value')
+CUR_APP_URL=$(echo "$SSO_SETTINGS" | jq -r '.[] | select(.name=="STATIC_WEB_APP_URL") | .value')
+
+if [ -z "$CUR_TENANT" ] || [ -z "$CUR_CLIENT" ]; then
+    print_info "SSO is not configured on this deployment (local authentication only)."
+    print_info "To add external-tenant SSO, run ./deploy.sh (SSO step) or:"
+    print_info "  Manage-Access.ps1 -Action ConfigureSso"
+else
+    echo "This release supports SSO for users in a SEPARATE Azure AD (Entra) tenant"
+    echo "from the one hosting the app. Current SSO settings:"
+    echo "  - SSO (users') tenant ID:      ${CUR_TENANT}"
+    echo "  - Host App Registration:       ${CUR_CLIENT}"
+    echo "  - Initial promaster email(s):  ${CUR_PROMASTERS:-<none set>}"
+    echo "  - In-directory user mgmt:      ${CUR_AAD_MGMT:-<unset> (treated as off)}"
+    echo ""
+    read -p "Review/update the SSO configuration now? (yes/no) [yes]: " REVIEW_SSO
+    REVIEW_SSO=${REVIEW_SSO:-yes}
+
+    if [ "$REVIEW_SSO" = "yes" ]; then
+        echo ""
+        echo "Press Enter to keep the current value shown in [brackets]."
+        echo ""
+        echo "If your users live in a DIFFERENT tenant than shown above (e.g. you are"
+        echo "moving from single-tenant to external SSO), enter that tenant's ID here."
+        read -p "  SSO (users') tenant ID [${CUR_TENANT}]: " NEW_TENANT
+        NEW_TENANT=${NEW_TENANT:-$CUR_TENANT}
+
+        read -p "  Initial promaster email(s), comma-separated [${CUR_PROMASTERS}]: " NEW_PROMASTERS
+        NEW_PROMASTERS=${NEW_PROMASTERS:-$CUR_PROMASTERS}
+
+        # Ensure the host App Registration accepts users from other tenants.
+        # Without this, external users cannot sign in (AADSTS50020 / AADSTS700016).
+        print_info "Ensuring the host App Registration is multi-tenant..."
+        CURRENT_AUDIENCE=$(az ad app show --id "$CUR_CLIENT" --query "signInAudience" -o tsv 2>/dev/null || echo "")
+        if [ "$CURRENT_AUDIENCE" = "AzureADMultipleOrgs" ] || [ "$CURRENT_AUDIENCE" = "AzureADandPersonalMicrosoftAccount" ]; then
+            print_info "App Registration is already multi-tenant ($CURRENT_AUDIENCE)"
+        else
+            az rest --method PATCH \
+                --uri "https://graph.microsoft.com/v1.0/applications(appId='$CUR_CLIENT')" \
+                --headers "Content-Type=application/json" \
+                --body "{\"signInAudience\": \"AzureADMultipleOrgs\"}" \
+                2>/dev/null \
+                && print_info "App Registration set to multi-tenant (AzureADMultipleOrgs)" \
+                || print_warning "Could not set multi-tenant flag; set 'Supported account types' to 'Accounts in any organizational directory' in the Azure Portal"
+        fi
+
+        print_info "Updating Function App SSO settings..."
+        az functionapp config appsettings set \
+            --name "$FUNCTION_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --settings \
+                AZURE_TENANT_ID="$NEW_TENANT" \
+                INITIAL_PROMASTER_EMAILS="$NEW_PROMASTERS" \
+                ENABLE_AAD_USER_MANAGEMENT="false" \
+            --output none \
+            && print_info "SSO settings updated" \
+            || print_warning "Failed to update SSO settings"
+
+        ADMIN_CONSENT_URL="https://login.microsoftonline.com/${NEW_TENANT}/adminconsent?client_id=${CUR_CLIENT}&redirect_uri=${CUR_APP_URL}"
+
+        if [ "$NEW_TENANT" != "$CUR_TENANT" ]; then
+            print_warning "SSO tenant changed ($CUR_TENANT -> $NEW_TENANT)."
+            print_warning "An admin of the NEW tenant must grant consent (URL shown at the end)."
+        fi
+    else
+        print_info "Leaving SSO configuration unchanged."
+    fi
+fi
+
 # Update frontend
 print_section "Updating Frontend"
 
@@ -325,9 +415,20 @@ echo "✅ Update Status:"
 echo "  • Code pulled from repository (if git enabled)"
 echo "  • Infrastructure updated (if selected)"
 echo "  • Database migrations applied"
+echo "  • SSO configuration reconciled"
 echo "  • Backend rebuilt and deployed"
 echo "  • Frontend rebuilt and deployed"
 echo ""
+if [ -n "$ADMIN_CONSENT_URL" ]; then
+    echo "🔐 SSO admin consent (grant once, in your users' tenant):"
+    echo "   A Global Administrator of the SSO tenant must open this URL so that"
+    echo "   tenant's users can sign in (skip if already granted for this tenant):"
+    echo ""
+    echo -e "   ${GREEN}${ADMIN_CONSENT_URL}${NC}"
+    echo ""
+    echo "   You can reprint it later with: ./print-consent-url.sh $RESOURCE_GROUP"
+    echo ""
+fi
 echo "🎯 Next Steps:"
 echo "  1. Visit your application to verify the update"
 echo "  2. Test critical functionality"

@@ -292,13 +292,30 @@ export async function getUserProfile(decodedToken: DecodedToken): Promise<UserPr
     };
   }
 
-  // No existing user found - create new user
-  // Check if this is the first user in the system
-  const userCountResult = await query('SELECT COUNT(*) as count FROM user_profiles');
-  const userCount = parseInt(userCountResult.rows[0].count);
+  // No existing user found - create new user.
+  //
+  // Role assignment for a brand-new SSO user:
+  //   * If INITIAL_PROMASTER_EMAILS is set, ONLY emails on that allow-list get
+  //     'promaster'; everyone else gets 'user'. This is the required behaviour
+  //     for external-tenant SSO: users sign in from a separate customer/Entra
+  //     directory, so the first person to authenticate could be any employee —
+  //     we must never silently hand them admin.
+  //   * If the allow-list is unset (legacy single-tenant deployments where the
+  //     app and its users share one tenant), fall back to the original
+  //     bootstrap: the very first user in an empty system becomes 'promaster'.
+  const promasterAllowList = (process.env.INITIAL_PROMASTER_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
 
-  // First user gets Promaster role, all others get 'user' role
-  const role = userCount === 0 ? 'promaster' : 'user';
+  let role: 'user' | 'promaster';
+  if (promasterAllowList.length > 0) {
+    role = promasterAllowList.includes(email.toLowerCase()) ? 'promaster' : 'user';
+  } else {
+    const userCountResult = await query('SELECT COUNT(*) as count FROM user_profiles');
+    const userCount = parseInt(userCountResult.rows[0].count);
+    role = userCount === 0 ? 'promaster' : 'user';
+  }
 
   // Create new user profile
   const insertResult = await query(

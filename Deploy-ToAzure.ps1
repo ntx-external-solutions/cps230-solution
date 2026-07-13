@@ -98,23 +98,58 @@ if ($postgresPasswordPlain.Length -lt 8) {
     exit 1
 }
 
-$adminEmail = Read-Host "Initial admin email address"
+# Initial admin account = the first application login (local username/password),
+# kept separate from the PostgreSQL database password.
+$adminEmail = Read-Host "Admin username (email address)"
 if ([string]::IsNullOrWhiteSpace($adminEmail)) {
     Write-Host "ERROR: Admin email is required" -ForegroundColor Red
     exit 1
 }
 
-# Azure AD SSO (optional). Leave blank to deploy with local authentication only.
+$adminFullName = Read-Host "Admin full name [System Administrator]"
+if ([string]::IsNullOrWhiteSpace($adminFullName)) { $adminFullName = "System Administrator" }
+
+# Dedicated admin password (prompted + confirmed), NOT reused from PostgreSQL.
+$adminPasswordPlain = $null
+while ($true) {
+    $adminPasswordSecure = Read-Host "Admin password (min 8 chars)" -AsSecureString
+    $adminPasswordPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($adminPasswordSecure))
+    if ($adminPasswordPlain.Length -lt 8) {
+        Write-Host "ERROR: Admin password must be at least 8 characters" -ForegroundColor Red
+        continue
+    }
+    $adminConfirmSecure = Read-Host "Confirm admin password" -AsSecureString
+    $adminConfirmPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($adminConfirmSecure))
+    if ($adminPasswordPlain -ne $adminConfirmPlain) {
+        Write-Host "ERROR: Passwords do not match; please try again" -ForegroundColor Red
+        continue
+    }
+    break
+}
+
+# External-tenant SSO (optional). Leave the SSO tenant blank to deploy with local
+# authentication only. Two directories are involved:
+#   * HOST tenant – where you are deploying (this az/az login context). The App
+#     Registration lives here and must be multi-tenant.
+#   * SSO tenant  – your users' Azure AD / Entra directory. Its admin grants
+#     consent (URL printed at the end) to create the Enterprise App there.
 # These values are baked into the frontend at build time and set on the Function
 # App, so they must be collected before the frontend is built.
-$azureTenantId = Read-Host "Azure AD Tenant ID (optional, blank = local auth only)"
+Write-Host ""
+Write-Host "SSO lets users from a SEPARATE Azure AD (Entra) tenant sign in." -ForegroundColor Cyan
+Write-Host "You need a multi-tenant App Registration in the HOST tenant first." -ForegroundColor Cyan
+$azureTenantId = Read-Host "SSO (users') Directory (tenant) ID (optional, blank = local auth only)"
 $azureClientId = ""
+$initialPromasterEmails = ""
 if (![string]::IsNullOrWhiteSpace($azureTenantId)) {
-    $azureClientId = Read-Host "Azure AD Client ID (App Registration)"
+    $azureClientId = Read-Host "Host App Registration - Application (client) ID"
     if ([string]::IsNullOrWhiteSpace($azureClientId)) {
-        Write-Host "ERROR: Client ID is required when a Tenant ID is provided" -ForegroundColor Red
+        Write-Host "ERROR: Client ID is required when an SSO tenant is provided" -ForegroundColor Red
         exit 1
     }
+    $initialPromasterEmails = Read-Host "Initial promaster email(s), comma-separated (blank = assign via local admin)"
 }
 
 # Get GitHub repository URL (optional)
@@ -135,9 +170,9 @@ Write-Host "Resource Group: $resourceGroup"
 Write-Host "Base Name: $baseName"
 Write-Host "Admin Email: $adminEmail"
 if ([string]::IsNullOrWhiteSpace($azureTenantId)) {
-    Write-Host "Azure AD SSO: not configured (local auth only)"
+    Write-Host "External-tenant SSO: not configured (local auth only)"
 } else {
-    Write-Host "Azure AD SSO: enabled (tenant $azureTenantId)"
+    Write-Host "External-tenant SSO: enabled (SSO tenant $azureTenantId, host app $azureClientId)"
 }
 Write-Host "GitHub Repo: $githubRepo"
 Write-Host ""
@@ -289,12 +324,11 @@ if (-not $countOk) {
 } elseif ($userCount -gt 0) {
     Write-Host "Users already exist. Skipping initial admin creation." -ForegroundColor Yellow
 } else {
-    $adminFullName = "System Administrator"
-
     # Generate a bcrypt hash using the backend's bcryptjs (installed in Step 3).
     # The password is passed via an env var so it never lands in the command line,
-    # and hashSync avoids async-callback quoting headaches.
-    $env:ADMIN_PW = $postgresPasswordPlain
+    # and hashSync avoids async-callback quoting headaches. Uses the dedicated
+    # admin password entered above, NOT the PostgreSQL password.
+    $env:ADMIN_PW = $adminPasswordPlain
     Push-Location backend
     $passwordHash = (node -e "console.log(require('bcryptjs').hashSync(process.env.ADMIN_PW, 12))")
     $hashExit = $LASTEXITCODE
@@ -373,21 +407,47 @@ az functionapp cors add `
     --name $functionAppName `
     --allowed-origins $staticWebAppUrl | Out-Null
 
-# Configure Azure AD SSO on the backend and App Registration (if provided).
+# Configure external-tenant SSO on the backend and App Registration (if provided).
+# The App Registration lives in the HOST tenant (this az login context), NOT the
+# SSO/users tenant.
 if (![string]::IsNullOrWhiteSpace($azureClientId)) {
-    Write-Host "Configuring Azure AD SSO..." -ForegroundColor Yellow
+    Write-Host "Configuring external-tenant SSO..." -ForegroundColor Yellow
 
     # Backend validates tokens against these. appsettings set merges, so other
     # settings (connection string, etc.) are preserved.
+    #   AZURE_TENANT_ID           = the SSO (users') tenant, used to validate tokens
+    #   INITIAL_PROMASTER_EMAILS  = who becomes admin on first SSO login
+    #   ENABLE_AAD_USER_MANAGEMENT= off; users are managed in their own tenant
     az functionapp config appsettings set `
         --name $functionAppName `
         --resource-group $resourceGroup `
-        --settings AZURE_TENANT_ID=$azureTenantId AZURE_CLIENT_ID=$azureClientId `
+        --settings AZURE_TENANT_ID=$azureTenantId AZURE_CLIENT_ID=$azureClientId INITIAL_PROMASTER_EMAILS=$initialPromasterEmails ENABLE_AAD_USER_MANAGEMENT=false `
         --output none
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✓ Function App SSO settings configured" -ForegroundColor Green
     } else {
         Write-Host "WARNING: Failed to set Function App SSO settings" -ForegroundColor Yellow
+    }
+
+    # Ensure the App Registration is multi-tenant so users from the SSO tenant can
+    # sign in. Without this, Azure rejects them (AADSTS50020 / AADSTS700016).
+    $currentAudience = az ad app show --id $azureClientId --query "signInAudience" -o tsv 2>$null
+    if ($currentAudience -eq "AzureADMultipleOrgs" -or $currentAudience -eq "AzureADandPersonalMicrosoftAccount") {
+        Write-Host "✓ App Registration is already multi-tenant ($currentAudience)" -ForegroundColor Green
+    } else {
+        $audienceTmp = New-TemporaryFile
+        Write-Utf8NoBom -Path $audienceTmp.FullName -Lines @('{"signInAudience": "AzureADMultipleOrgs"}')
+        az rest --method PATCH `
+            --uri "https://graph.microsoft.com/v1.0/applications(appId='$azureClientId')" `
+            --headers "Content-Type=application/json" `
+            --body "@$($audienceTmp.FullName)" 2>$null
+        $audienceExit = $LASTEXITCODE
+        Remove-Item $audienceTmp -ErrorAction SilentlyContinue
+        if ($audienceExit -eq 0) {
+            Write-Host "✓ App Registration set to multi-tenant (AzureADMultipleOrgs)" -ForegroundColor Green
+        } else {
+            Write-Host "WARNING: Could not set multi-tenant flag. In the Azure Portal set 'Supported account types' to 'Accounts in any organizational directory'." -ForegroundColor Yellow
+        }
     }
 
     # Register the site as a SPA redirect URI, preserving any existing ones.
@@ -437,21 +497,37 @@ Write-Host ""
 
 if ($adminCreated) {
     Write-Host "=== Initial Admin Login (local auth) ===" -ForegroundColor Blue
-    Write-Host "Email:    " -NoNewline; Write-Host $adminEmail -ForegroundColor Green
-    Write-Host "Password: " -NoNewline; Write-Host "(the PostgreSQL admin password you entered)" -ForegroundColor Green
+    Write-Host "Username: " -NoNewline; Write-Host $adminEmail -ForegroundColor Green
+    Write-Host "Password: " -NoNewline; Write-Host "(the admin password you set during install)" -ForegroundColor Green
     Write-Host "Role:     " -NoNewline; Write-Host "promaster (full admin)" -ForegroundColor Green
     Write-Host "!  Change this password after first login." -ForegroundColor Yellow
     Write-Host ""
 } else {
     Write-Host "=== Admin Access ===" -ForegroundColor Blue
-    Write-Host "No local admin was seeded. Either the first Azure AD sign-in becomes admin," -ForegroundColor Yellow
+    Write-Host "No local admin was seeded. Assign admins via INITIAL_PROMASTER_EMAILS (SSO)," -ForegroundColor Yellow
     Write-Host "or run: .\Manage-Access.ps1 -Action NewAdmin to create a local admin." -ForegroundColor Yellow
+    Write-Host ""
+}
+
+# External-tenant SSO requires a one-time admin consent in the USERS' tenant.
+if (![string]::IsNullOrWhiteSpace($azureTenantId)) {
+    $adminConsentUrl = "https://login.microsoftonline.com/$azureTenantId/adminconsent?client_id=$azureClientId&redirect_uri=$staticWebAppUrl"
+    Write-Host "=== ACTION REQUIRED - In Your SSO (Users') Tenant ===" -ForegroundColor Magenta
+    Write-Host "A Global Administrator of the SSO tenant ($azureTenantId) must open this" -ForegroundColor Yellow
+    Write-Host "consent URL once. It creates the Enterprise App in that tenant so its users" -ForegroundColor Yellow
+    Write-Host "can sign in. Until then, sign-in fails with 'need admin approval' (AADSTS65001)." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  $adminConsentUrl" -ForegroundColor Green
     Write-Host ""
 }
 
 Write-Host "=== Next Steps ===" -ForegroundColor Yellow
 Write-Host "1. Navigate to: $staticWebAppUrl"
-Write-Host "2. Log in with Azure AD credentials"
+if (![string]::IsNullOrWhiteSpace($azureTenantId)) {
+    Write-Host "2. Have an SSO-tenant admin grant consent (URL above), then sign in with SSO"
+} else {
+    Write-Host "2. Log in with the local admin credentials above"
+}
 Write-Host "3. Configure Process Manager credentials in Settings"
 Write-Host "4. Run initial sync to import processes"
 Write-Host ""

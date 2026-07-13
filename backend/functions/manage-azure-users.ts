@@ -15,6 +15,42 @@ import { TokenCredentialAuthenticationProvider } from '@microsoft/microsoft-grap
 import { ClientSecretCredential } from '@azure/identity';
 
 /**
+ * Whether this deployment is allowed to create/list/delete users directly in
+ * the Azure AD / Entra directory via Microsoft Graph.
+ *
+ * This only makes sense when the App Registration and the users live in the
+ * SAME tenant (the legacy "customer hosts the app in their own tenant" model).
+ * In external-tenant SSO mode the app is registered in the HOST tenant while
+ * users sign in from a SEPARATE customer/SSO tenant — this app holds no rights
+ * to manage users in that directory and must not try. The customer administers
+ * their own users in their own Entra portal.
+ *
+ * Off unless ENABLE_AAD_USER_MANAGEMENT is explicitly "true".
+ */
+function aadUserManagementEnabled(): boolean {
+  return (process.env.ENABLE_AAD_USER_MANAGEMENT || '').toLowerCase() === 'true';
+}
+
+function aadUserManagementDisabledResponse(
+  corsHeaders: Record<string, string>
+): HttpResponseInit {
+  return {
+    status: 403,
+    headers: corsHeaders,
+    jsonBody: {
+      error: 'Azure AD user management is disabled for this deployment',
+      details:
+        'Users sign in from an external Azure AD / Entra tenant, which is managed by ' +
+        'its own administrators. Create, disable, or reset those users in that ' +
+        "directory's Entra portal. To enable in-directory provisioning from this app, " +
+        'set ENABLE_AAD_USER_MANAGEMENT=true (only valid when the App Registration and ' +
+        'the users share one tenant, and the app has been granted the required Graph ' +
+        'directory permissions).',
+    },
+  };
+}
+
+/**
  * Get Microsoft Graph client with admin credentials
  */
 function getGraphClient(): Client {
@@ -50,6 +86,10 @@ async function createAzureUser(
       status: 204,
       headers: corsHeaders,
     };
+  }
+
+  if (!aadUserManagementEnabled()) {
+    return aadUserManagementDisabledResponse(corsHeaders);
   }
 
   try {
@@ -179,6 +219,10 @@ async function listAzureUsers(
     };
   }
 
+  if (!aadUserManagementEnabled()) {
+    return aadUserManagementDisabledResponse(corsHeaders);
+  }
+
   try {
     // Authenticate and check permissions
     const userProfile = await authenticateRequestUnified(request);
@@ -237,6 +281,10 @@ async function deleteAzureUser(
       status: 204,
       headers: corsHeaders,
     };
+  }
+
+  if (!aadUserManagementEnabled()) {
+    return aadUserManagementDisabledResponse(corsHeaders);
   }
 
   try {
@@ -326,6 +374,10 @@ async function resetUserPassword(
       status: 204,
       headers: corsHeaders,
     };
+  }
+
+  if (!aadUserManagementEnabled()) {
+    return aadUserManagementDisabledResponse(corsHeaders);
   }
 
   try {

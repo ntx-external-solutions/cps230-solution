@@ -54,12 +54,43 @@ LOCATION=${LOCATION:-australiaeast}
 read -p "Base name for resources [cps230]: " BASE_NAME
 BASE_NAME=${BASE_NAME:-cps230}
 
-read -p "Initial admin email: " ADMIN_EMAIL
+read -p "GitHub repository URL (optional, press Enter to skip): " GITHUB_REPO
+
+read -p "Enable cost-optimized configuration? (Reduces costs ~90%, yes/no) [yes]: " COST_OPT
+COST_OPT=${COST_OPT:-yes}
+COST_OPTIMIZED=$([ "$COST_OPT" = "yes" ] && echo "true" || echo "false")
+
+print_section "Initial Admin Account"
+echo "This is the first application login (local username/password). It is kept"
+echo "separate from the PostgreSQL database password below."
+echo ""
+read -p "Admin username (email address): " ADMIN_EMAIL
 if [ -z "$ADMIN_EMAIL" ]; then
     print_error "Admin email is required"
     exit 1
 fi
 
+read -p "Admin full name [System Administrator]: " ADMIN_FULL_NAME
+ADMIN_FULL_NAME=${ADMIN_FULL_NAME:-System Administrator}
+
+# Dedicated admin password (prompted + confirmed), NOT reused from PostgreSQL.
+while true; do
+    read -sp "Admin password (min 8 chars): " ADMIN_PASSWORD
+    echo
+    if [ ${#ADMIN_PASSWORD} -lt 8 ]; then
+        print_error "Admin password must be at least 8 characters"
+        continue
+    fi
+    read -sp "Confirm admin password: " ADMIN_PASSWORD_CONFIRM
+    echo
+    if [ "$ADMIN_PASSWORD" != "$ADMIN_PASSWORD_CONFIRM" ]; then
+        print_error "Passwords do not match; please try again"
+        continue
+    fi
+    break
+done
+
+print_section "Database Configuration"
 read -sp "PostgreSQL admin password: " POSTGRES_PASSWORD
 echo
 if [ -z "$POSTGRES_PASSWORD" ]; then
@@ -67,38 +98,60 @@ if [ -z "$POSTGRES_PASSWORD" ]; then
     exit 1
 fi
 
-read -p "GitHub repository URL (optional, press Enter to skip): " GITHUB_REPO
-
-read -p "Enable cost-optimized configuration? (Reduces costs ~90%, yes/no) [yes]: " COST_OPT
-COST_OPT=${COST_OPT:-yes}
-COST_OPTIMIZED=$([ "$COST_OPT" = "yes" ] && echo "true" || echo "false")
-
-print_section "Azure AD SSO Configuration (Optional)"
-echo "Azure AD SSO is optional. You can:"
-echo "  1. Configure now for SSO authentication"
-echo "  2. Skip and use local database authentication only"
-echo "  3. Add Azure AD SSO later via Azure Portal"
+print_section "Single Sign-On (SSO) Configuration (Optional)"
+echo "This app can authenticate users who live in a SEPARATE Azure AD (Entra ID)"
+echo "tenant from the one hosting the app. Two directories are involved:"
 echo ""
-read -p "Configure Azure AD SSO now? (yes/no) [no]: " CONFIGURE_AZURE_AD
+echo "  • HOST tenant  – the Azure subscription you are deploying into right now."
+echo "                   The App Registration for this app lives here. You are"
+echo "                   currently signed in to this tenant with 'az login'."
+echo "  • SSO tenant   – your users' Azure AD / Entra directory. People sign in"
+echo "                   from here. An Enterprise App is created in this tenant"
+echo "                   when one of ITS admins grants consent — a step this"
+echo "                   script prints for you at the end."
+echo ""
+echo "Before continuing you need an App Registration in the HOST tenant that is"
+echo "marked multi-tenant (\"Accounts in any organizational directory\"). This"
+echo "script will set that flag for you if it isn't already. Create the App"
+echo "Registration in the Azure Portal (Azure AD > App registrations > New) if you"
+echo "don't have one yet, and note its Application (client) ID."
+echo ""
+echo "You can:"
+echo "  1. Configure external-tenant SSO now"
+echo "  2. Skip and use local database authentication only (add SSO later)"
+echo ""
+read -p "Configure external-tenant SSO now? (yes/no) [no]: " CONFIGURE_AZURE_AD
 CONFIGURE_AZURE_AD=${CONFIGURE_AZURE_AD:-no}
 
 if [ "$CONFIGURE_AZURE_AD" = "yes" ]; then
-    read -p "Azure AD Tenant ID: " AZURE_TENANT_ID
-    if [ -z "$AZURE_TENANT_ID" ]; then
-        print_error "Azure AD Tenant ID is required when configuring SSO"
+    echo ""
+    echo "Enter the App Registration from the HOST tenant (where the app is deployed):"
+    read -p "  Host App Registration - Application (client) ID: " AZURE_CLIENT_ID
+    if [ -z "$AZURE_CLIENT_ID" ]; then
+        print_error "Host App Registration Client ID is required when configuring SSO"
         exit 1
     fi
 
-    read -p "Azure AD Client ID (App Registration): " AZURE_CLIENT_ID
-    if [ -z "$AZURE_CLIENT_ID" ]; then
-        print_error "Azure AD Client ID is required when configuring SSO"
+    echo ""
+    echo "Enter the SSO tenant (your users' Azure AD / Entra directory):"
+    read -p "  SSO (users') Directory (tenant) ID: " AZURE_TENANT_ID
+    if [ -z "$AZURE_TENANT_ID" ]; then
+        print_error "SSO tenant ID is required when configuring SSO"
         exit 1
     fi
+
+    echo ""
+    echo "Which SSO user(s) should become an admin (promaster) on first login?"
+    echo "Enter one or more email addresses, comma-separated. Everyone else who"
+    echo "signs in starts as a normal 'user'. Leave blank to assign roles later"
+    echo "using the seeded local admin account."
+    read -p "  Initial promaster email(s): " INITIAL_PROMASTER_EMAILS
 else
-    print_info "Skipping Azure AD SSO configuration"
+    print_info "Skipping SSO configuration"
     print_info "The application will use local database authentication only"
     AZURE_TENANT_ID=""
     AZURE_CLIENT_ID=""
+    INITIAL_PROMASTER_EMAILS=""
 fi
 
 # Confirm deployment
@@ -110,11 +163,12 @@ echo "Admin Email: $ADMIN_EMAIL"
 echo "GitHub Repo: ${GITHUB_REPO:-Not specified}"
 echo "Cost Optimized: $COST_OPTIMIZED"
 if [ -n "$AZURE_TENANT_ID" ]; then
-    echo "Azure AD SSO: Enabled"
-    echo "  - Tenant ID: $AZURE_TENANT_ID"
-    echo "  - Client ID: $AZURE_CLIENT_ID"
+    echo "External-tenant SSO: Enabled"
+    echo "  - SSO (users') tenant ID: $AZURE_TENANT_ID"
+    echo "  - Host App Registration client ID: $AZURE_CLIENT_ID"
+    echo "  - Initial promaster email(s): ${INITIAL_PROMASTER_EMAILS:-none (assign via local admin)}"
 else
-    echo "Azure AD SSO: Disabled (local authentication only)"
+    echo "SSO: Disabled (local authentication only)"
 fi
 echo
 if [ "$COST_OPTIMIZED" = "true" ]; then
@@ -234,8 +288,8 @@ if command -v psql &> /dev/null; then
 
         print_info "Creating initial admin user..."
         export ADMIN_EMAIL="$ADMIN_EMAIL"
-        export ADMIN_PASSWORD="$POSTGRES_PASSWORD"
-        export ADMIN_FULL_NAME="System Administrator"
+        export ADMIN_PASSWORD="$ADMIN_PASSWORD"
+        export ADMIN_FULL_NAME="$ADMIN_FULL_NAME"
 
         ./database/create-initial-admin.sh
         if [ $? -eq 0 ]; then
@@ -255,12 +309,32 @@ fi
 
 unset POSTGRES_PASSWORD
 unset ADMIN_PASSWORD
+unset ADMIN_PASSWORD_CONFIRM
 
-# Configure Azure AD App Registration (if configured)
+# Configure Azure AD App Registration (if configured).
+# NOTE: the App Registration lives in the HOST tenant (the one you're logged into
+# with `az login`), NOT the SSO/users tenant. All az commands below target the
+# host tenant's app registration.
 if [ -n "$AZURE_CLIENT_ID" ]; then
-    print_section "Configuring Azure AD App Registration"
+    print_section "Configuring Host Tenant App Registration"
 
-    print_info "Updating Azure AD app registration with SPA redirect URI: $STATIC_WEB_APP_URL"
+    # Ensure the app registration is multi-tenant. Without this, users from the
+    # separate SSO tenant cannot sign in (Azure returns AADSTS50020 / AADSTS700016).
+    print_info "Ensuring App Registration accepts users from other tenants (multi-tenant)..."
+    CURRENT_AUDIENCE=$(az ad app show --id "$AZURE_CLIENT_ID" --query "signInAudience" -o tsv 2>/dev/null || echo "")
+    if [ "$CURRENT_AUDIENCE" = "AzureADMultipleOrgs" ] || [ "$CURRENT_AUDIENCE" = "AzureADandPersonalMicrosoftAccount" ]; then
+        print_info "App Registration is already multi-tenant ($CURRENT_AUDIENCE)"
+    else
+        az rest --method PATCH \
+            --uri "https://graph.microsoft.com/v1.0/applications(appId='$AZURE_CLIENT_ID')" \
+            --headers "Content-Type=application/json" \
+            --body "{\"signInAudience\": \"AzureADMultipleOrgs\"}" \
+            2>/dev/null \
+            && print_info "App Registration set to multi-tenant (AzureADMultipleOrgs)" \
+            || print_warning "Could not set multi-tenant flag; set 'Supported account types' to 'Accounts in any organizational directory' manually in the Azure Portal"
+    fi
+
+    print_info "Updating App Registration with SPA redirect URI: $STATIC_WEB_APP_URL"
 
     # Get existing SPA redirect URIs to preserve them
     EXISTING_URIS=$(az ad app show --id "$AZURE_CLIENT_ID" --query "spa.redirectUris" -o json 2>/dev/null || echo "[]")
@@ -328,6 +402,8 @@ az functionapp config appsettings set \
     --settings \
         AZURE_TENANT_ID="$AZURE_TENANT_ID" \
         AZURE_CLIENT_ID="$AZURE_CLIENT_ID" \
+        INITIAL_PROMASTER_EMAILS="$INITIAL_PROMASTER_EMAILS" \
+        ENABLE_AAD_USER_MANAGEMENT="false" \
         JWT_SECRET="$JWT_SECRET" \
         ALLOWED_ORIGINS="$STATIC_WEB_APP_URL" \
         STATIC_WEB_APP_URL="$STATIC_WEB_APP_URL" \
@@ -462,6 +538,28 @@ else
     fi
 fi
 
+# Build the SSO tenant admin-consent URL (used below and saved to deployment info).
+# Granting consent in the SSO tenant is what creates the Enterprise App (service
+# principal) there and lets that tenant's users sign in.
+if [ -n "$AZURE_TENANT_ID" ]; then
+    ADMIN_CONSENT_URL="https://login.microsoftonline.com/${AZURE_TENANT_ID}/adminconsent?client_id=${AZURE_CLIENT_ID}&redirect_uri=${STATIC_WEB_APP_URL}"
+
+    print_section "ACTION REQUIRED — In Your SSO (Users') Tenant"
+    print_warning "Everything above ran in the HOST tenant. One step remains, and it must"
+    print_warning "be done by a Global Administrator (or Privileged Role Admin) of the SSO"
+    print_warning "tenant ($AZURE_TENANT_ID) — the directory your users belong to."
+    echo ""
+    echo "That admin must open this consent URL once and approve the app. This creates"
+    echo "the Enterprise App in the SSO tenant so its users can sign in:"
+    echo ""
+    echo -e "  ${GREEN}${ADMIN_CONSENT_URL}${NC}"
+    echo ""
+    echo "Until consent is granted, users from the SSO tenant will see an error such as"
+    echo "\"need admin approval\" (AADSTS65001) when they try to sign in."
+    echo ""
+    read -p "Press Enter to continue (you can send the URL to that admin later)... " _
+fi
+
 # Save deployment info
 print_section "Saving Deployment Information"
 
@@ -489,10 +587,13 @@ EOF
 
 if [ -n "$AZURE_TENANT_ID" ]; then
 cat >> deployment-info.txt << EOF
-- Mode: Azure AD SSO + Local Authentication
-- Azure AD Tenant ID: $AZURE_TENANT_ID
-- Azure AD Client ID: $AZURE_CLIENT_ID
-- Azure AD Redirect URI: $STATIC_WEB_APP_URL
+- Mode: External-Tenant Azure AD SSO + Local Authentication
+- SSO (users') Tenant ID: $AZURE_TENANT_ID
+- Host App Registration Client ID: $AZURE_CLIENT_ID
+- Redirect URI: $STATIC_WEB_APP_URL
+- Initial promaster email(s): ${INITIAL_PROMASTER_EMAILS:-none set (assign roles via the local admin)}
+- SSO tenant admin-consent URL (must be granted once by an SSO-tenant admin):
+  $ADMIN_CONSENT_URL
 EOF
 else
 cat >> deployment-info.txt << EOF
@@ -504,8 +605,8 @@ fi
 cat >> deployment-info.txt << EOF
 
 Initial Admin Credentials:
-- Email:    $ADMIN_EMAIL
-- Password: (same as PostgreSQL admin password)
+- Username: $ADMIN_EMAIL
+- Password: (the admin password you set during install)
 - Role:     promaster (full admin access)
 
 ⚠️  IMPORTANT: Change the admin password after first login!
@@ -537,14 +638,17 @@ EOF
 
 if [ -n "$AZURE_TENANT_ID" ]; then
 cat >> deployment-info.txt << EOF
-2. Sign in with Azure AD - first user will automatically get 'promaster' role
-   OR create a local user account (first user will get 'promaster' role)
+2. Have an SSO-tenant admin grant consent using the admin-consent URL above
+   (creates the Enterprise App in your users' tenant).
+3. SSO users can then sign in. Anyone listed in "Initial promaster email(s)"
+   becomes an admin on first login; everyone else starts as a normal 'user'.
+   You can also sign in with the seeded local admin below to assign roles.
 EOF
 else
 cat >> deployment-info.txt << EOF
 2. Log in with the initial admin credentials:
-   - Email: $ADMIN_EMAIL
-   - Password: (same as PostgreSQL password)
+   - Username: $ADMIN_EMAIL
+   - Password: (the admin password you set during install)
    - Role: promaster (full admin access)
    ⚠️  Change this password after first login!
 3. (Optional) Configure Azure AD SSO later via Function App settings:
@@ -578,24 +682,27 @@ echo "  • Database initialized with schema"
 echo "  • Backend deployed (14 HTTP functions)"
 echo "  • Initial admin user created"
 if [ -n "$AZURE_TENANT_ID" ]; then
-    echo "  • Azure AD SSO configured"
+    echo "  • External-tenant SSO configured (host app registration set multi-tenant)"
 else
-    echo "  • Local authentication configured (Azure AD SSO skipped)"
+    echo "  • Local authentication configured (SSO skipped)"
 fi
 echo "  • Function App environment variables set"
 echo "  • Frontend built and deployed"
 echo
 echo "🔑 Initial Admin Credentials:"
-echo "  • Email:    $ADMIN_EMAIL"
-echo "  • Password: (same as PostgreSQL password)"
+echo "  • Username: $ADMIN_EMAIL"
+echo "  • Password: (the admin password you set during install)"
 echo "  • Role:     promaster (full admin access)"
 echo "  ⚠️  IMPORTANT: Change this password after first login!"
 echo
 echo "🎯 Next Steps:"
-echo "  1. Visit: $STATIC_WEB_APP_URL"
 if [ -n "$AZURE_TENANT_ID" ]; then
-    echo "  2. Sign in with Azure AD OR use the local admin account above"
+    echo "  1. Have an SSO-tenant admin grant consent (URL shown above and saved to"
+    echo "     deployment-info.txt) so your users' tenant trusts the app"
+    echo "  2. Visit: $STATIC_WEB_APP_URL and sign in with SSO,"
+    echo "     OR use the local admin account above"
 else
+    echo "  1. Visit: $STATIC_WEB_APP_URL"
     echo "  2. Log in with the admin credentials shown above"
 fi
 echo "  3. Configure Process Manager credentials in Settings"

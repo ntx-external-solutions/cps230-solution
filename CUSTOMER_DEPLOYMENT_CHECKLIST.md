@@ -66,27 +66,43 @@ The script will ask for:
 - Environment (dev/staging/prod)
 - Azure region (default: australiaeast)
 - Base name (default: cps230)
-- Initial admin email
+- Initial admin account: username (email), full name, and a password you set
+  (this is the first app login, kept separate from the database password)
 - PostgreSQL admin password
 - GitHub repository URL (optional)
 - Cost optimization (yes/no)
-- Azure AD Tenant ID
-- Azure AD Client ID
+- SSO (users') tenant ID — the Azure AD / Entra directory your users belong to
+- Host App Registration client ID — the multi-tenant app registration in the
+  tenant where the app is deployed
+- Initial promaster email(s) — who becomes admin on first SSO login
+
+> **Users sign in from a different tenant than the one hosting the app?** That is
+> the supported model. See **[EXTERNAL_TENANT_SSO_SETUP.md](EXTERNAL_TENANT_SSO_SETUP.md)**
+> for the two-tenant walkthrough — the deploy script prompts for the values above
+> and prints the one-time consent URL your identity admin must approve.
 
 ### 4. Wait for Completion (~15-20 minutes)
 The script will:
 - Deploy Azure infrastructure
 - Initialize database
 - Deploy backend functions
-- Configure Azure AD app
+- Configure the host App Registration (multi-tenant + redirect URI)
 - Deploy frontend application
+- Print the **admin-consent URL** for your SSO tenant
 
 ### 5. Post-Deployment Configuration
 
+#### Grant admin consent (in your SSO/users' tenant)
+A Global Administrator of your users' tenant opens the consent URL the script
+printed. This creates the Enterprise App in that tenant so its users can sign in.
+Until this is done, sign-in fails with "need admin approval" (AADSTS65001).
+
 #### First Sign-In
 1. Navigate to the deployed Static Web App URL
-2. Sign in with Azure AD
-3. **First user automatically gets 'promaster' role**
+2. Sign in with Azure AD (from your SSO tenant)
+3. **Users listed in `INITIAL_PROMASTER_EMAILS` get the 'promaster' role on first
+   login; everyone else starts as 'user'.** You can also use the seeded local
+   admin account to assign roles.
 
 #### Configure Process Manager Integration
 1. Go to Settings page
@@ -134,8 +150,19 @@ The script will:
 - Clear browser cache
 
 #### "Cannot create users"
-- First user must sign in with Azure AD (auto-promaster)
-- Subsequent users require promaster to create them
+- Assign the first admin via `INITIAL_PROMASTER_EMAILS`, or sign in with the
+  seeded local admin account
+- Subsequent users require a promaster to grant them roles
+
+#### "Need admin approval" (AADSTS65001) on sign-in
+- Admin consent hasn't been granted in the SSO tenant yet
+- Have a Global Admin of your users' tenant open the consent URL from the deploy
+  output (see EXTERNAL_TENANT_SSO_SETUP.md)
+
+#### "AADSTS50020 / AADSTS700016" on sign-in
+- The host App Registration isn't multi-tenant
+- Re-run the SSO step, or set "Supported account types" to "Accounts in any
+  organizational directory" in the Azure Portal
 
 ### View Logs
 ```bash
