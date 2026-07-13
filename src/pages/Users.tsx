@@ -59,9 +59,14 @@ export default function UserManagement() {
     forceChangePassword: true,
   });
 
-  const [editFormData, setEditFormData] = useState({
+  const [editFormData, setEditFormData] = useState<{
+    email: string;
+    full_name: string;
+    role: 'user' | 'business_analyst' | 'promaster';
+  }>({
     email: '',
     full_name: '',
+    role: 'user',
   });
 
   // Fetch local users
@@ -179,6 +184,7 @@ export default function UserManagement() {
       setEditFormData({
         email: '',
         full_name: '',
+        role: 'user',
       });
       toast({
         title: 'User updated',
@@ -279,6 +285,7 @@ export default function UserManagement() {
       data: {
         email: editFormData.email,
         full_name: editFormData.full_name || null,
+        role: editFormData.role,
       },
     });
   };
@@ -501,6 +508,7 @@ export default function UserManagement() {
                               setEditFormData({
                                 email: user.email,
                                 full_name: user.full_name || '',
+                                role: user.role,
                               });
                               setEditDialogOpen(true);
                             }}
@@ -646,6 +654,25 @@ export default function UserManagement() {
                   placeholder="John Doe"
                 />
               </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="editRole">Application Role</Label>
+                <Select
+                  value={editFormData.role}
+                  onValueChange={(value: 'user' | 'business_analyst' | 'promaster') =>
+                    setEditFormData({ ...editFormData, role: value })
+                  }
+                >
+                  <SelectTrigger id="editRole">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user">User (View Only)</SelectItem>
+                    <SelectItem value="business_analyst">Business Analyst (Can Edit)</SelectItem>
+                    <SelectItem value="promaster">Promaster (Full Admin)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <DialogFooter>
@@ -657,6 +684,7 @@ export default function UserManagement() {
                   setEditFormData({
                     email: '',
                     full_name: '',
+                    role: 'user',
                   });
                 }}
               >
