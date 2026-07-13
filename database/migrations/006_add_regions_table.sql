@@ -18,6 +18,13 @@ CREATE INDEX IF NOT EXISTS idx_regions_code ON public.regions(region_code);
 -- Enable RLS
 ALTER TABLE public.regions ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies first so this migration is idempotent (CREATE POLICY has
+-- no IF NOT EXISTS, so re-applying without these drops errors out).
+DROP POLICY IF EXISTS "Authenticated users can view regions" ON public.regions;
+DROP POLICY IF EXISTS "Promasters can insert regions" ON public.regions;
+DROP POLICY IF EXISTS "Promasters can update regions" ON public.regions;
+DROP POLICY IF EXISTS "Promasters can delete regions" ON public.regions;
+
 -- Create RLS policies
 CREATE POLICY "Authenticated users can view regions"
   ON public.regions FOR SELECT

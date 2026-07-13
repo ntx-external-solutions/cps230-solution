@@ -50,6 +50,15 @@ CREATE INDEX IF NOT EXISTS idx_critical_operation_systems_system_id
 ALTER TABLE public.critical_operation_processes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.critical_operation_systems ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies first so this migration is idempotent (CREATE POLICY has
+-- no IF NOT EXISTS, so re-applying without these drops errors out).
+DROP POLICY IF EXISTS critical_operation_processes_select_policy ON public.critical_operation_processes;
+DROP POLICY IF EXISTS critical_operation_processes_insert_policy ON public.critical_operation_processes;
+DROP POLICY IF EXISTS critical_operation_processes_delete_policy ON public.critical_operation_processes;
+DROP POLICY IF EXISTS critical_operation_systems_select_policy ON public.critical_operation_systems;
+DROP POLICY IF EXISTS critical_operation_systems_insert_policy ON public.critical_operation_systems;
+DROP POLICY IF EXISTS critical_operation_systems_delete_policy ON public.critical_operation_systems;
+
 -- Create RLS policies for critical_operation_processes
 -- Users can view all critical operation processes
 CREATE POLICY critical_operation_processes_select_policy ON public.critical_operation_processes

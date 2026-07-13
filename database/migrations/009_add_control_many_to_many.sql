@@ -82,6 +82,15 @@ ALTER TABLE public.control_critical_operations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.control_processes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.control_systems ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies first so this migration is idempotent (CREATE POLICY has
+-- no IF NOT EXISTS, so re-applying without these drops errors out).
+DROP POLICY IF EXISTS "Authenticated users can view control-critical operations" ON public.control_critical_operations;
+DROP POLICY IF EXISTS "Promasters and analysts can manage control-critical operations" ON public.control_critical_operations;
+DROP POLICY IF EXISTS "Authenticated users can view control-processes" ON public.control_processes;
+DROP POLICY IF EXISTS "Promasters and analysts can manage control-processes" ON public.control_processes;
+DROP POLICY IF EXISTS "Authenticated users can view control-systems" ON public.control_systems;
+DROP POLICY IF EXISTS "Promasters and analysts can manage control-systems" ON public.control_systems;
+
 -- =====================================================
 -- 7. Create RLS Policies for control_critical_operations
 -- =====================================================

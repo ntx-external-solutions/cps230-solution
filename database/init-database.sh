@@ -106,7 +106,10 @@ if [ -d "$SCRIPT_DIR/migrations" ] && [ "$(ls -A $SCRIPT_DIR/migrations/*.sql 2>
         if [ -f "$migration" ]; then
             MIGRATION_NAME=$(basename "$migration" .sql)
             print_info "Applying migration: $MIGRATION_NAME"
-            if psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$migration"; then
+            # ON_ERROR_STOP=1 so a real SQL error fails the migration instead of
+            # being silently swallowed (psql otherwise returns 0 despite errors).
+            # Safe because the migrations are idempotent.
+            if psql -v ON_ERROR_STOP=1 -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$migration"; then
                 # Record it (idempotent: ON CONFLICT DO NOTHING).
                 psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
                     -c "INSERT INTO public.schema_migrations (version) VALUES ('$MIGRATION_NAME') ON CONFLICT (version) DO NOTHING;" > /dev/null

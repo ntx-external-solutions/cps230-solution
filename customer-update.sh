@@ -254,7 +254,10 @@ if command -v psql &> /dev/null; then
                 if [ "$APPLIED" = "f" ]; then
                     print_info "Applying migration: $MIGRATION_NAME"
 
-                    if PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$migration"; then
+                    # ON_ERROR_STOP=1 so a real SQL error fails the migration (and
+                    # the upgrade) instead of being silently swallowed and recorded
+                    # as applied. Safe because the migrations are idempotent.
+                    if PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$migration"; then
                         # Record successful migration
                         PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO schema_migrations (version) VALUES ('$MIGRATION_NAME');"
                         print_info "Migration $MIGRATION_NAME applied successfully"
