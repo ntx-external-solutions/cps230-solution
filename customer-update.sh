@@ -42,25 +42,60 @@ else
     print_warning "VERSION file not found"
 fi
 
-# Check if deployment-info.txt exists
-if [ ! -f "deployment-info.txt" ]; then
-    print_error "deployment-info.txt not found. This script should be run from a deployed CPS230 instance."
-    print_info "If this is a new deployment, please run ./deploy.sh instead."
+# Ensure Azure CLI is available and logged in (needed to read settings/discover
+# resources and to deploy).
+if ! command -v az &> /dev/null; then
+    print_error "Azure CLI is not installed. Install from https://aka.ms/azure-cli"
+    exit 1
+fi
+if ! az account show &> /dev/null; then
+    print_error "Not logged in to Azure. Run 'az login' first."
     exit 1
 fi
 
-# Extract deployment information
-RESOURCE_GROUP=$(grep "Resource Group:" deployment-info.txt | cut -d':' -f2 | xargs)
-FUNCTION_APP_NAME=$(grep "Function App:" deployment-info.txt | cut -d':' -f2 | xargs)
-STATIC_WEB_APP_NAME=$(grep "Static Web App:" deployment-info.txt | cut -d':' -f2- | xargs | cut -d'.' -f1 | sed 's/https:\/\///')
-POSTGRES_FQDN=$(grep "PostgreSQL Server:" deployment-info.txt | cut -d':' -f2 | xargs)
-POSTGRES_DB=$(grep "PostgreSQL Database:" deployment-info.txt | cut -d':' -f2 | xargs)
+# Determine the target deployment. Priority:
+#   1. Resource group passed as an argument (or RESOURCE_GROUP env var)
+#   2. deployment-info.txt in the current directory (written by deploy.sh)
+# With (1), resources are discovered from Azure, so an admin can upgrade from a
+# fresh clone without the original deploy machine's deployment-info.txt.
+RESOURCE_GROUP="${1:-${RESOURCE_GROUP:-}}"
+FUNCTION_APP_NAME=""
+STATIC_WEB_APP_NAME=""
+
+if [ -z "$RESOURCE_GROUP" ] && [ -f "deployment-info.txt" ]; then
+    print_info "Reading deployment coordinates from deployment-info.txt"
+    RESOURCE_GROUP=$(grep "Resource Group:" deployment-info.txt | cut -d':' -f2 | xargs)
+    FUNCTION_APP_NAME=$(grep "Function App:" deployment-info.txt | cut -d':' -f2 | xargs)
+    STATIC_WEB_APP_NAME=$(grep "Static Web App:" deployment-info.txt | cut -d':' -f2- | xargs | cut -d'.' -f1 | sed 's/https:\/\///')
+fi
+
+if [ -z "$RESOURCE_GROUP" ]; then
+    print_error "No target resource group. Pass it as an argument:"
+    print_info "  ./customer-update.sh <resource-group>"
+    print_info "(or run from a directory containing deployment-info.txt from the original deploy)"
+    exit 1
+fi
+
+# Discover any resources we don't already have from Azure.
+if [ -z "$FUNCTION_APP_NAME" ]; then
+    print_info "Discovering Function App in '$RESOURCE_GROUP'..."
+    FUNCTION_APP_NAME=$(az functionapp list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv 2>/dev/null)
+fi
+if [ -z "$STATIC_WEB_APP_NAME" ]; then
+    print_info "Discovering Static Web App in '$RESOURCE_GROUP'..."
+    STATIC_WEB_APP_NAME=$(az staticwebapp list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv 2>/dev/null)
+fi
+
+if [ -z "$FUNCTION_APP_NAME" ] || [ -z "$STATIC_WEB_APP_NAME" ]; then
+    print_error "Could not find a Function App and/or Static Web App in '$RESOURCE_GROUP'."
+    print_info "Check the resource group name and that you're logged into the right subscription."
+    exit 1
+fi
 
 print_info "Detected deployment:"
 print_info "  - Resource Group: $RESOURCE_GROUP"
 print_info "  - Function App: $FUNCTION_APP_NAME"
 print_info "  - Static Web App: $STATIC_WEB_APP_NAME"
-print_info "  - PostgreSQL Server: $POSTGRES_FQDN"
 
 # Confirm update
 echo ""
@@ -165,6 +200,28 @@ if [ -z "$POSTGRES_HOST" ] || [ -z "$POSTGRES_PASSWORD" ]; then
 fi
 
 print_info "Database credentials retrieved successfully"
+
+# Allow this machine to reach PostgreSQL for the migration step.
+# The server is normally only open to Azure services, so the psql commands below
+# (run from THIS machine) fail with "Failed to connect" unless the current public
+# IP is whitelisted. deploy.sh does the same on a clean install.
+print_section "Configuring Database Firewall"
+POSTGRES_SERVER_NAME="${POSTGRES_HOST%%.*}"
+CURRENT_IP=$(curl -s https://api.ipify.org)
+if [ -n "$CURRENT_IP" ]; then
+    print_info "Adding this machine's IP ($CURRENT_IP) to the PostgreSQL firewall..."
+    az postgres flexible-server firewall-rule create \
+        --resource-group "$RESOURCE_GROUP" \
+        --name "$POSTGRES_SERVER_NAME" \
+        --rule-name "update-machine" \
+        --start-ip-address "$CURRENT_IP" \
+        --end-ip-address "$CURRENT_IP" \
+        --output none 2>/dev/null \
+        && print_info "Firewall rule added (or already present)" \
+        || print_warning "Could not add firewall rule; migrations may fail to connect"
+else
+    print_warning "Could not determine public IP; migrations may fail to connect"
+fi
 
 # Apply database migrations
 print_section "Applying Database Migrations"
@@ -402,7 +459,8 @@ fi
 # Summary
 print_section "Update Complete!"
 
-STATIC_WEB_APP_URL=$(grep "Web Application:" deployment-info.txt | cut -d':' -f2- | xargs)
+# STATIC_WEB_APP_URL is already set from the Function App settings during the
+# frontend update above (no dependency on deployment-info.txt).
 
 FINAL_VERSION=$(cat VERSION 2>/dev/null | tr -d '[:space:]' || echo "unknown")
 echo "Your CPS230 solution has been updated to v${FINAL_VERSION}!"

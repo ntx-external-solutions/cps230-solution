@@ -85,16 +85,34 @@ else
     exit 1
 fi
 
-# Run migrations if any exist
+# Run migrations if any exist.
+#
+# We also RECORD each applied migration in a schema_migrations table. Without
+# this, customer-update.sh (which tracks migrations) sees an untracked database
+# on the first upgrade and re-applies every migration. The migrations are written
+# idempotently so that is harmless today, but recording them here keeps upgrades
+# clean and fast, and protects against any future non-idempotent migration.
 if [ -d "$SCRIPT_DIR/migrations" ] && [ "$(ls -A $SCRIPT_DIR/migrations/*.sql 2>/dev/null)" ]; then
     print_info "Applying migrations..."
+
+    # Ensure the tracking table exists (same shape customer-update.sh expects).
+    psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+        CREATE TABLE IF NOT EXISTS public.schema_migrations (
+            version VARCHAR(255) PRIMARY KEY,
+            applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );" > /dev/null
+
     for migration in "$SCRIPT_DIR/migrations"/*.sql; do
         if [ -f "$migration" ]; then
-            print_info "Applying migration: $(basename $migration)"
+            MIGRATION_NAME=$(basename "$migration" .sql)
+            print_info "Applying migration: $MIGRATION_NAME"
             if psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$migration"; then
-                print_info "Migration applied: $(basename $migration)"
+                # Record it (idempotent: ON CONFLICT DO NOTHING).
+                psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+                    -c "INSERT INTO public.schema_migrations (version) VALUES ('$MIGRATION_NAME') ON CONFLICT (version) DO NOTHING;" > /dev/null
+                print_info "Migration applied: $MIGRATION_NAME"
             else
-                print_error "Failed to apply migration: $(basename $migration)"
+                print_error "Failed to apply migration: $MIGRATION_NAME"
                 exit 1
             fi
         fi
